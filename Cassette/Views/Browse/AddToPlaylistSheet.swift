@@ -17,26 +17,7 @@ struct AddToPlaylistSheet: View {
 
     var body: some View {
         Group {
-            #if os(macOS)
             macOSContent
-            #else
-            NavigationStack {
-                Group {
-                    if let vm {
-                        content(vm)
-                    } else {
-                        ProgressView()
-                    }
-                }
-                .navigationTitle("Add to Playlist")
-                .navigationBarTitleDisplayModeInline()
-                .toolbar {
-                    ToolbarItem(placement: .cancellationAction) {
-                        Button("Cancel") { dismiss() }
-                    }
-                }
-            }
-            #endif
         }
         .onAppear {
             guard vm == nil,
@@ -87,7 +68,6 @@ struct AddToPlaylistSheet: View {
         }
     }
 
-    #if os(macOS)
     private var macOSContent: some View {
         VStack(spacing: 0) {
             HStack {
@@ -108,7 +88,6 @@ struct AddToPlaylistSheet: View {
         }
         .frame(minWidth: 400, minHeight: 380)
     }
-    #endif
 
     @ViewBuilder
     private func content(_ vm: AddToPlaylistViewModel) -> some View {
@@ -185,7 +164,7 @@ private struct AddToPlaylistRow: View {
 
     var body: some View {
         HStack(spacing: CassetteSpacing.m) {
-            PlaylistCoverThumbnail(playlistId: playlist.id, serverId: nil, coverArtId: playlist.coverArt ?? playlist.id, title: playlist.name, size: 44)
+            PlaylistCoverThumbnail(coverArtId: playlist.coverArt ?? playlist.id, size: 44)
             VStack(alignment: .leading, spacing: 2) {
                 Text(playlist.name)
                     .font(.cassetteCellTitle)

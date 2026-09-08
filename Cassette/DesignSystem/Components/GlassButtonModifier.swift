@@ -11,7 +11,7 @@ extension View {
     /// so that the parent .buttonStyle(.borderless) gesture fix is preserved.
     @ViewBuilder
     func cassetteGlassButton(size: CGFloat = 44, tint: Color? = nil) -> some View {
-        if #available(macOS 26.0, iOS 26.0, *) {
+        if #available(macOS 26.0, *) {
             // .interactive() removed — causes infinite StyleModifier recursion during
             // NavigationStack transitions on macOS 26.5 (54k-frame stack overflow).
             // Re-evaluate when Apple fixes Glass StyleModifier composition (rdar://TODO).
@@ -29,7 +29,7 @@ extension View {
     /// Applies a capsule Liquid Glass effect (for wider controls).
     @ViewBuilder
     func cassetteGlassCapsule(tint: Color? = nil) -> some View {
-        if #available(macOS 26.0, iOS 26.0, *) {
+        if #available(macOS 26.0, *) {
             // .interactive() removed — same crash risk as cassetteGlassButton.
             let glass: Glass = tint.map { Glass.regular.tint($0) } ?? Glass.regular
             self.glassEffect(glass, in: .capsule)
@@ -38,17 +38,17 @@ extension View {
         }
     }
 
-    /// Over-cover HERO round button, tuned per OS since only iOS 26 has system toolbar glass:
+    /// Over-cover HERO round button, tuned per OS version since only macOS 26 has system toolbar glass:
     ///
-    /// - **iOS 26 / macOS 26**: TRANSPARENT — no surface/fill, just the tap area + a soft shadow so the glyph
+    /// - **macOS 26**: TRANSPARENT — no surface/fill, just the tap area + a soft shadow so the glyph
     ///   stays legible on a busy cover without a backing (the Apple-Music trick). The caller colors the glyph
     ///   for direct contrast on the cover. Pair with `.buttonStyle(.plain)` to drop the native toolbar glass.
-    /// - **iOS 18 / macOS 15**: there is no system toolbar glass, so a bare glyph disappears into busy
+    /// - **macOS 15**: there is no system toolbar glass, so a bare glyph disappears into busy
     ///   artwork. Back it with a circular material chip (the native "chrome button over media" look, as in
     ///   Photos / Music) so the control reads clearly and stays a comfortable tap target.
     @ViewBuilder
     func cassetteHeroButton(size: CGFloat = 44) -> some View {
-        if #available(iOS 26.0, macOS 26.0, *) {
+        if #available(macOS 26.0, *) {
             self
                 .shadow(color: .black.opacity(0.28), radius: 3, y: 1)
                 .frame(width: size, height: size)

@@ -20,7 +20,7 @@ actor PlaybackSessionService {
         self.modelContainer = modelContainer
     }
 
-    /// Full save — queue + position + current track metadata + repeat mode.
+    /// Full save — queue + position + current track metadata + repeat mode + shuffle state.
     func save(playerState: SessionPayload) {
         let session = fetchOrCreateSession()
         session.update(
@@ -28,7 +28,9 @@ actor PlaybackSessionService {
             currentPosition: playerState.currentPosition,
             queue: playerState.queue,
             currentTrack: playerState.currentTrack,
-            repeatMode: playerState.repeatMode
+            repeatMode: playerState.repeatMode,
+            isShuffled: playerState.isShuffled,
+            originalQueue: playerState.originalQueue
         )
         do {
             try modelContext.save()
@@ -68,7 +70,9 @@ actor PlaybackSessionService {
             currentIndex: safeIndex,
             currentPosition: session.currentPosition,
             currentTrackDuration: session.currentTrackDuration,
-            repeatMode: session.decodedRepeatMode()
+            repeatMode: session.decodedRepeatMode(),
+            isShuffled: session.isShuffled,
+            originalQueue: session.decodedOriginalQueue()
         )
     }
 
@@ -106,6 +110,9 @@ nonisolated struct SessionPayload: Sendable {
     let queue: [DisplayableSong]
     let currentTrack: DisplayableSong?
     let repeatMode: RepeatMode
+    let isShuffled: Bool
+    /// Pre-shuffle queue order — nil when shuffle is off or the order was invalidated.
+    let originalQueue: [DisplayableSong]?
 }
 
 // MARK: - RestoredSession
@@ -117,4 +124,6 @@ nonisolated struct RestoredSession: Sendable {
     let currentPosition: TimeInterval
     let currentTrackDuration: TimeInterval
     let repeatMode: RepeatMode
+    let isShuffled: Bool
+    let originalQueue: [DisplayableSong]?
 }

@@ -5,7 +5,6 @@
 
 import SwiftUI
 
-#if os(macOS)
 extension ToolbarContent {
     /// Guards `.sharedBackgroundVisibility` behind macOS 26.0 availability.
     /// Falls back to a no-op on earlier macOS versions.
@@ -18,4 +17,3 @@ extension ToolbarContent {
         }
     }
 }
-#endif

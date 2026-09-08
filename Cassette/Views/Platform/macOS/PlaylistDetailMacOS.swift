@@ -3,7 +3,6 @@
 // Licensed under the Mozilla Public License 2.0.
 // See LICENSE file in the project root for full license information.
 
-#if os(macOS)
 import OSLog
 import SwiftSonic
 import SwiftUI
@@ -30,6 +29,10 @@ struct PlaylistDetailMacOS: View {
     @State private var showEditSheet = false
     @State private var showAddMusic = false
     @State private var songToAddToPlaylist: DisplayableSong?
+    /// Keyboard-navigable selection: ↑/↓ move, ↩ plays — driven by SongListKeyboardNavigator,
+    /// works immediately on page switch.
+    @State private var selectedSongId: String?
+    @State private var keyboardNavToken: UUID?
 
     var body: some View {
         Group {
@@ -122,11 +125,22 @@ struct PlaylistDetailMacOS: View {
                         }
                         try? await container?.playerService.play(tracks: songs, startIndex: 0)
                     }
-                }
+                },
+                contentTopInset: 26
             )
             .frame(maxWidth: .infinity)
+            .overlay(alignment: .topTrailing) {
+                // HStack is required: an overlay lays a bare ViewBuilder's children out like a
+                // ZStack, which stacked all four buttons at the same position.
+                HStack(spacing: 10) {
+                    actionButtons
+                }
+                .padding(.trailing, 20)
+                .padding(.top, 12)
+            }
 
-            List {
+            ScrollViewReader { proxy in
+            List(selection: $selectedSongId) {
                 if vm.isLoading && songs.isEmpty {
                     ProgressView()
                         .frame(maxWidth: .infinity)
@@ -172,10 +186,29 @@ struct PlaylistDetailMacOS: View {
             .safeAreaInset(edge: .bottom) {
                 Color.clear.frame(height: CassetteMacOSLayout.playerBarReservedHeight / 2)
             }
+            .onAppear {
+                keyboardNavToken = SongListKeyboardNavigator.shared.activate(
+                    songs: { vm.songs },
+                    selection: $selectedSongId,
+                    scrollTo: { proxy.scrollTo($0) },
+                    play: { index in
+                        Task { try? await container?.playerService.play(tracks: vm.songs, startIndex: index) }
+                    }
+                )
+            }
+            .onDisappear {
+                if let token = keyboardNavToken {
+                    SongListKeyboardNavigator.shared.deactivate(token)
+                }
+            }
             .sheet(item: $songToAddToPlaylist) { song in
                 AddToPlaylistSheet(song: song)
             }
+            }
         }
+        // Full-bleed: the hero extends up under the transparent toolbar, so the page reclaims the
+        // strip the floating action buttons (+ / edit / download / delete) used to reserve.
+        .ignoresSafeArea(edges: .top)
     }
 
     private func saveEdit(name newName: String, description: String) async {
@@ -234,91 +267,85 @@ struct PlaylistDetailMacOS: View {
             }
             .cassetteSharedBackgroundVisibility(.hidden)
         }
+    }
 
-        ToolbarItem(placement: .primaryAction) {
+    /// Add / edit / download / delete actions, pinned to the hero's top-right corner as an in-page
+    /// overlay (the window toolbar placed them over the cover's leading edge).
+    @ViewBuilder
+    private var actionButtons: some View {
+        Button {
+            showAddMusic = true
+        } label: {
+            Image(systemName: "plus")
+                .font(.system(size: 13, weight: .semibold))
+                .foregroundStyle(.primary)
+                .cassetteGlassButton(size: 28)
+        }
+        .buttonStyle(.borderless)
+        .disabled(vm?.isOffline == true || container?.serverState.isOnline != true || vm?.playlistDetail == nil)
+        .help("Add Music")
+
+        Button {
+            showEditSheet = true
+        } label: {
+            Image(systemName: "pencil")
+                .font(.system(size: 13, weight: .semibold))
+                .foregroundStyle(.primary)
+                .cassetteGlassButton(size: 28)
+        }
+        .buttonStyle(.borderless)
+        .disabled(vm?.isOffline == true || container?.serverState.isOnline != true || vm?.playlistDetail == nil)
+        .help("Edit Playlist")
+
+        if vm?.isDownloadingPlaylist == true {
             Button {
-                showAddMusic = true
+                Task { await vm?.cancelPlaylistDownload() }
             } label: {
-                Image(systemName: "plus")
+                Image(systemName: "xmark.circle")
                     .font(.system(size: 13, weight: .semibold))
                     .foregroundStyle(.primary)
                     .cassetteGlassButton(size: 28)
             }
             .buttonStyle(.borderless)
-            .disabled(vm?.isOffline == true || container?.serverState.isOnline != true || vm?.playlistDetail == nil)
-            .help("Add Music")
-        }
-        .cassetteSharedBackgroundVisibility(.hidden)
-
-        ToolbarItem(placement: .primaryAction) {
+            .help("Cancel Download")
+        } else if vm?.songs.contains(where: { $0.isDownloaded }) == true {
+            // Downloaded → this button manages the LOCAL copy (free space) — distinct from the trash, which
+            // deletes the playlist itself. Reuses the existing "Remove downloaded playlist?" confirmation.
             Button {
-                showEditSheet = true
+                showDeleteAlert = true
             } label: {
-                Image(systemName: "pencil")
+                Image(systemName: "arrow.down.circle.fill")
                     .font(.system(size: 13, weight: .semibold))
                     .foregroundStyle(.primary)
                     .cassetteGlassButton(size: 28)
             }
             .buttonStyle(.borderless)
-            .disabled(vm?.isOffline == true || container?.serverState.isOnline != true || vm?.playlistDetail == nil)
-            .help("Edit Playlist")
-        }
-        .cassetteSharedBackgroundVisibility(.hidden)
-
-        ToolbarItem(placement: .primaryAction) {
-            if vm?.isDownloadingPlaylist == true {
-                Button {
-                    Task { await vm?.cancelPlaylistDownload() }
-                } label: {
-                    Image(systemName: "xmark.circle")
-                        .font(.system(size: 13, weight: .semibold))
-                        .foregroundStyle(.primary)
-                        .cassetteGlassButton(size: 28)
-                }
-                .buttonStyle(.borderless)
-                .help("Cancel Download")
-            } else if vm?.songs.contains(where: { $0.isDownloaded }) == true {
-                // Downloaded → this button manages the LOCAL copy (free space) — distinct from the trash, which
-                // deletes the playlist itself. Reuses the existing "Remove downloaded playlist?" confirmation.
-                Button {
-                    showDeleteAlert = true
-                } label: {
-                    Image(systemName: "arrow.down.circle.fill")
-                        .font(.system(size: 13, weight: .semibold))
-                        .foregroundStyle(.primary)
-                        .cassetteGlassButton(size: 28)
-                }
-                .buttonStyle(.borderless)
-                .help("Remove Download")
-            } else {
-                Button {
-                    Task { await vm?.downloadPlaylist() }
-                } label: {
-                    Image(systemName: "arrow.down.circle")
-                        .font(.system(size: 13, weight: .semibold))
-                        .foregroundStyle(.primary)
-                        .cassetteGlassButton(size: 28)
-                }
-                .buttonStyle(.borderless)
-                .disabled(vm?.isOffline == true || container?.serverState.isOnline != true)
-                .help("Download Playlist")
-            }
-        }
-        .cassetteSharedBackgroundVisibility(.hidden)
-
-        ToolbarItem(placement: .destructiveAction) {
-            Button(role: .destructive) {
-                showDeletePlaylistConfirm = true
+            .help("Remove Download")
+        } else {
+            Button {
+                Task { await vm?.downloadPlaylist() }
             } label: {
-                Image(systemName: "trash")
+                Image(systemName: "arrow.down.circle")
                     .font(.system(size: 13, weight: .semibold))
-                    .foregroundStyle(.red)
+                    .foregroundStyle(.primary)
                     .cassetteGlassButton(size: 28)
             }
             .buttonStyle(.borderless)
-            .help("Delete Playlist")
+            .disabled(vm?.isOffline == true || container?.serverState.isOnline != true)
+            .help("Download Playlist")
         }
-        .cassetteSharedBackgroundVisibility(.hidden)
+
+        Button(role: .destructive) {
+            showDeletePlaylistConfirm = true
+        } label: {
+            Image(systemName: "trash")
+                .font(.system(size: 13, weight: .semibold))
+                .foregroundStyle(.red)
+                .cassetteGlassButton(size: 28)
+        }
+        .buttonStyle(.borderless)
+        .disabled(vm?.isOffline == true)
+        .help("Delete Playlist")
     }
 }
 
@@ -364,4 +391,3 @@ private struct PlaylistEditSheet: View {
         }
     }
 }
-#endif

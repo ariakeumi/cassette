@@ -3,7 +3,6 @@
 // Licensed under the Mozilla Public License 2.0.
 // See LICENSE file in the project root for full license information.
 
-#if os(macOS)
 import SwiftUI
 
 struct MiniPlayerWindowView: View {
@@ -196,4 +195,3 @@ struct MiniPlayerWindowView: View {
         return parts.isEmpty ? " " : parts.joined(separator: " — ")
     }
 }
-#endif

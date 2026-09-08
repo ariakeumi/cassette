@@ -19,13 +19,6 @@ nonisolated struct NowPlayingSnapshot: Sendable {
     /// coverArtId from the source song — used by NowPlayingService to check
     /// ArtworkImageCache before falling back to a URL fetch.
     let coverArtId: String?
-    /// True when the current playback is a live stream (radio). When true, duration and
-    /// position are not meaningful — NowPlayingService omits them from the info dict so
-    /// Control Center hides the scrubber automatically.
-    let isLiveStream: Bool
-    /// The radio station's display name when isLiveStream is true; nil otherwise.
-    let radioStationName: String?
-    /// Id of the playing song, so the remote like command knows what to star. `nil` for radio,
-    /// which has nothing to favourite.
+    /// Id of the playing song, so the remote like command knows what to star.
     let songId: String?
 }

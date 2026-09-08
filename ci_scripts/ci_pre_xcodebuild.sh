@@ -5,7 +5,7 @@
 # agvtool is unusable here: it does not update the MARKETING_VERSION build setting
 # and aborts with "Cannot find .../YES" on targets that set GENERATE_INFOPLIST_FILE=YES
 # without an INFOPLIST_FILE. MARKETING_VERSION is defined once at the project level
-# (the app and widget extension inherit it), so set it directly in the project file.
+# (the app inherits it), so set it directly in the project file.
 
 set -e
 

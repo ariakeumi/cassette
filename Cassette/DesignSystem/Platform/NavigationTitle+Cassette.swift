@@ -8,19 +8,11 @@ import SwiftUI
 extension View {
     /// Sets navigation title display mode to inline. No-op on macOS where the concept doesn't exist.
     func navigationBarTitleDisplayModeInline() -> some View {
-        #if os(iOS)
-        self.navigationBarTitleDisplayMode(.inline)
-        #else
         self
-        #endif
     }
 
     /// Sets navigation title display mode to large. No-op on macOS where the concept doesn't exist.
     func navigationBarTitleDisplayModeLarge() -> some View {
-        #if os(iOS)
-        self.navigationBarTitleDisplayMode(.large)
-        #else
         self
-        #endif
     }
 }

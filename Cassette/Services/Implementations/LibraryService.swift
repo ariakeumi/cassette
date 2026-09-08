@@ -75,8 +75,10 @@ actor LibraryService: LibraryServiceProtocol {
         try await client().getPlaylist(id: id)
     }
 
+    /// Songs-only search: artist/album counts are zeroed so the server skips those categories
+    /// entirely (the UI shows single tracks only).
     func search(_ query: String) async throws -> SearchResult3 {
-        try await client().search3(query)
+        try await client().search3(query, artistCount: 0, albumCount: 0)
     }
 
     func coverArtURL(id: String, size: Int?) async -> URL? {
@@ -223,9 +225,6 @@ actor LibraryService: LibraryServiceProtocol {
         try await client().getAlbumList2(type: .frequent, size: size)
     }
 
-    func songsByGenre(_ genre: String, count: Int) async throws -> [Song] {
-        try await client().getSongsByGenre(genre, count: count)
-    }
 
     func randomSongs(size: Int) async throws -> [Song] {
         try await client().getRandomSongs(size: size)

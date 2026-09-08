@@ -17,14 +17,7 @@ enum CassetteSpacing {
     static let xxxl: CGFloat  = 32
     static let xxxxl: CGFloat = 48
 
-    /// Bottom scroll margin reserved for the iOS tabViewBottomAccessory mini player,
-    /// which floats over tab content without extending the safe area.
-    static let miniPlayerBottomMargin: CGFloat = 80
 
-    /// Standard UITabBar height (iPhone portrait). On iOS 18 the mini player is hosted
-    /// via `safeAreaInset` on the TabView, which places content over the tab bar rather
-    /// than above it — this lifts it clear. The home-indicator inset is handled separately.
-    static let legacyTabBarHeight: CGFloat = 49
 }
 
 // MARK: - Corner radius scale
@@ -34,7 +27,7 @@ enum CassetteCornerRadius {
     static let s: CGFloat        = 6
     static let standard: CGFloat = 8    // all cover arts, most cards
     static let large: CGFloat     = 12   // full-player cover art, sheets
-    static let hero: CGFloat      = 20   // Wrapped stat hero, year card
+    static let hero: CGFloat      = 20
     static let pill: CGFloat      = 999  // capsule buttons
 }
 
@@ -51,21 +44,18 @@ enum CassetteShadow {
 
 // MARK: - macOS Layout
 
-#if os(macOS)
 enum CassetteMacOSLayout {
-    static let heroCoverArtSize: CGFloat = 280
-    /// heroHeight = heroCoverArtSize + 32 (top) + 32 (bottom padding)
-    static let heroHeight: CGFloat = 344
+    static let heroCoverArtSize: CGFloat = 180
+    /// heroHeight = heroCoverArtSize + 20 (top) + 20 (bottom padding)
+    static let heroHeight: CGFloat = 220
     static let playerBarReservedHeight: CGFloat = 120
 }
-#endif
 
 // MARK: - View modifier: content width
 
 struct ContentWidthModifier: ViewModifier {
     @ViewBuilder
     func body(content: Content) -> some View {
-        #if os(macOS)
         content
             .containerRelativeFrame(.horizontal, alignment: .center) { total, _ in
                 switch total {
@@ -75,9 +65,6 @@ struct ContentWidthModifier: ViewModifier {
                 default:      return min(total, 960)
                 }
             }
-        #else
-        content
-        #endif
     }
 }
 
@@ -86,12 +73,12 @@ extension View {
         modifier(ContentWidthModifier())
     }
 
-    /// Hides the iOS/macOS 26 scroll-edge effect (the soft blur the system fades under top bars). Used on the
+    /// Hides the macOS 26 scroll-edge effect (the soft blur the system fades under top bars). Used on the
     /// immersive detail scroll views, where the cover scrolls under a transparent nav bar and the blur would
     /// otherwise flicker in/out behind it.
     @ViewBuilder
     func cassetteHideTopScrollEdgeEffect() -> some View {
-        if #available(iOS 26.0, macOS 26.0, *) {
+        if #available(macOS 26.0, *) {
             scrollEdgeEffectHidden(true, for: .top)
         } else {
             self

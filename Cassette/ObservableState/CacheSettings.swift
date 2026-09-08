@@ -80,7 +80,7 @@ final class CacheSettings {
 
     static let defaultMaxTracks: Int = 10
     static let minMaxTracks: Int = 1
-    static let maxMaxTracks: Int = 10
+    static let maxMaxTracks: Int = 100
     static let defaultFormat: CacheFormat = .matchStream
     static let defaultCacheOverCellular: Bool = false
     static let defaultDownloadFormat: DownloadFormat = .default

@@ -3,7 +3,6 @@
 // Licensed under the Mozilla Public License 2.0.
 // See LICENSE file in the project root for full license information.
 
-#if os(macOS)
 import SwiftUI
 import SwiftSonic
 
@@ -219,11 +218,11 @@ struct ArtistDetailMacOS: View {
     // MARK: - Hero
 
     private func heroSection(vm: ArtistDetailViewModel) -> some View {
-        HStack(alignment: .center, spacing: 32) {
+        HStack(alignment: .center, spacing: 20) {
             coverCircle
             heroMetadata(vm: vm)
         }
-        .padding(32)
+        .padding(20)
         .frame(maxWidth: .infinity, alignment: .leading)
         .frame(height: CassetteMacOSLayout.heroHeight)
     }
@@ -234,9 +233,9 @@ struct ArtistDetailMacOS: View {
             size: 480,
             placeholderSystemImage: "person.fill"
         )
-        .frame(width: 240, height: 240)
+        .frame(width: 160, height: 160)
         .clipShape(Circle())
-        .shadow(color: .black.opacity(0.25), radius: 20, y: 8)
+        .shadow(color: .black.opacity(0.25), radius: 12, y: 5)
     }
 
     private func heroMetadata(vm: ArtistDetailViewModel) -> some View {
@@ -339,4 +338,3 @@ struct ArtistDetailMacOS: View {
         }
     }
 }
-#endif

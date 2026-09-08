@@ -8,9 +8,6 @@ import AudioStreaming
 import SwiftSonic
 import OSLog
 
-#if os(iOS)
-import AVFAudio
-#endif
 
 nonisolated enum CrossfadePhase: Sendable {
     case fadeOut
@@ -48,20 +45,7 @@ actor PlayerService: PlayerServiceProtocol {
     private var pendingRestoreInfo: (seekTime: Double, pause: Bool)?
     /// Source of the currently playing track; kept for repeat-one replay.
     private var currentSource: MediaSource?
-    private var liveStreamStallTask: Task<Void, Never>?
-
     private var audioSessionConfigured = false
-    #if os(iOS)
-    private var interruptionObserver: NSObjectProtocol?
-    private var routeChangeObserver: NSObjectProtocol?
-    /// Stored so pause()/stop() can cancel it before calling setActive(false),
-    /// preventing a stale retry from reactivating the session after the user stops.
-    private var sessionActivationRetryTask: Task<Void, Never>?
-    /// True when the current interruption began because the output route was disconnected
-    /// (AirPods in case). Per Apple guidance, never auto-resume after such an interruption
-    /// — resuming would route playback to the built-in speaker.
-    private var interruptionWasRouteDisconnect = false
-    #endif
 
     private var isHandlingEndOfTrack = false
     /// True when playback stopped cleanly at the END of the queue (repeat off). `resume()` reads this to restart
@@ -106,6 +90,12 @@ actor PlayerService: PlayerServiceProtocol {
     private var isFadingOut = false
     // Saved before a shuffle activation; nil when shuffle is off.
     private var originalQueueOrder: [DisplayableSong]?
+    /// Snapshot of the pre-shuffle queue for session persistence (nil when shuffle is off
+    /// or the order was invalidated by a queue edit). The background flush in CassetteApp
+    /// uses this too, so a deactivate can't wipe the persisted original order.
+    func originalQueueForSession() -> [DisplayableSong]? {
+        originalQueueOrder
+    }
     /// Single-slot guard preventing concurrent auto-extend fetches.
     private var autoExtendFetchTask: Task<Void, Never>?
     /// True while an Instant Mix is still assembling its tracks behind the already-playing seed.
@@ -227,12 +217,8 @@ actor PlayerService: PlayerServiceProtocol {
         }
 
         await MainActor.run {
-            if state.currentRadio != nil {
-                Logger.player.debug("Ending live stream session — switching to queue playback")
-            }
             state.queue = tracks
             state.currentIndex = startIndex
-            state.currentRadio = nil
             state.playbackState = .loading
         }
 
@@ -333,8 +319,6 @@ actor PlayerService: PlayerServiceProtocol {
         Logger.player.info("[TRANSITION] advancing to '\(song.title, privacy: .public)' (id=\(song.id, privacy: .public)) — starting AudioStreaming")
 
         stopProgressTimer()
-        liveStreamStallTask?.cancel()
-        liveStreamStallTask = nil
         currentSource = source
         pendingRestoreInfo = nil
         // Starting a new track can interrupt a muted parking play (end-of-queue rewind)
@@ -347,18 +331,9 @@ actor PlayerService: PlayerServiceProtocol {
             isMutedForRestore = false
         }
 
-        #if os(iOS)
-        configureAudioSessionIfNeeded()
-        #endif
 
         let fadingInAllowed: Bool
-        #if os(iOS)
-        fadingInAllowed = shouldFadeIn && !PlayerService.isProblematicRoute(
-            portTypes: AVAudioSession.sharedInstance().currentRoute.outputs.map { $0.portType }
-        )
-        #else
         fadingInAllowed = shouldFadeIn
-        #endif
 
         if fadingInAllowed {
             audioPlayer.volume = 0
@@ -402,8 +377,6 @@ actor PlayerService: PlayerServiceProtocol {
             artworkURL: artworkURL,
             artworkHeaders: artworkHeaders,
             coverArtId: song.coverArtId,
-            isLiveStream: false,
-            radioStationName: nil,
             songId: song.id
         )
         await nowPlayingService?.update(with: snapshot)
@@ -419,157 +392,6 @@ actor PlayerService: PlayerServiceProtocol {
         }
     }
 
-    // MARK: - Live Stream
-
-    func playRadio(_ station: InternetRadioStation) async throws {
-        cancelPendingScrobble()
-        cancelPendingCacheDownload()
-        cancelFadeTasks()
-        let source = try await mediaResolver.resolveRadio(station)
-
-        let codecResult = await checkCodecSupport(url: source.url, headers: source.customHeaders)
-        if case .unsupported(let contentType) = codecResult {
-            Logger.player.warning("[RADIO-CODEC] rejected stream, content-type=\(contentType, privacy: .public)")
-            await MainActor.run {
-                toastService.show(
-                    "This radio uses an unsupported audio format. Cassette can play MP3 and AAC live streams currently.",
-                    style: .error,
-                    duration: 5.0
-                )
-            }
-            return
-        }
-
-        stopProgressTimer()
-        liveStreamStallTask?.cancel()
-        liveStreamStallTask = nil
-        currentSource = source
-        pendingRestoreInfo = nil
-        // Same recovery as startPlayback(): a radio start can interrupt a muted
-        // parking play — cancel the deferred pause and unmute before playing.
-        restorePauseTask?.cancel()
-        restorePauseTask = nil
-        if isMutedForRestore {
-            audioPlayer.volume = restoredVolume
-            isMutedForRestore = false
-        }
-
-        #if os(iOS)
-        configureAudioSessionIfNeeded()
-        #endif
-
-        await MainActor.run {
-            state.currentTrack = nil
-            state.currentRadio = station
-            state.isSmartShuffleActive = false
-            state.originalQueueEndIndex = nil
-            state.playbackState = .loading
-            state.position = 0
-            state.duration = 0
-        }
-
-        audioPlayer.play(url: source.url, headers: source.customHeaders)
-
-        await MainActor.run {
-            state.playbackState = .playing
-            state.isPlaybackAvailable = true
-        }
-
-        startProgressTimer()
-        startLiveStreamStallMonitor(stationName: station.name)
-
-        let artworkHeaders: [String: String]
-        do {
-            artworkHeaders = try await serverService.activeCredentials().customHeaders
-        } catch {
-            Logger.player.warning("[CREDENTIALS] activeCredentials failed, using empty headers: \(error, privacy: .public)")
-            artworkHeaders = [:]
-        }
-        await nowPlayingService?.update(with: NowPlayingSnapshot(
-            title: station.name,
-            artist: "Live Radio",
-            album: nil,
-            duration: 0,
-            position: 0,
-            playbackRate: 1.0,
-            artworkURL: nil,
-            artworkHeaders: artworkHeaders,
-            coverArtId: station.coverArt,
-            isLiveStream: true,
-            radioStationName: station.name,
-            songId: nil
-        ))
-
-        startPositionSaveTimer()
-        Logger.player.info("Started live stream radio '\(station.name, privacy: .public)'")
-    }
-
-    // MARK: - Live Stream Codec Check & Failsafe
-
-    private nonisolated enum LiveStreamCodecResult {
-        case supported
-        case unsupported(contentType: String)
-        case ambiguous
-    }
-
-    private func checkCodecSupport(url: URL, headers: [String: String]) async -> LiveStreamCodecResult {
-        var request = URLRequest(url: url, cachePolicy: .reloadIgnoringCacheData, timeoutInterval: 2.0)
-        request.httpMethod = "HEAD"
-        for (key, value) in headers {
-            request.setValue(value, forHTTPHeaderField: key)
-        }
-        guard let (_, response) = try? await URLSession.shared.data(for: request),
-              let httpResponse = response as? HTTPURLResponse else {
-            Logger.player.debug("[RADIO-CODEC] HEAD request failed or timed out — letting player try")
-            return .ambiguous
-        }
-        let rawType = (httpResponse.allHeaderFields["Content-Type"] as? String ?? "").lowercased()
-        let contentType = rawType.components(separatedBy: ";").first?.trimmingCharacters(in: .whitespaces) ?? ""
-
-        let whitelist: Set<String> = ["audio/mpeg", "audio/mp4", "audio/aac", "audio/x-aac", "audio/aacp"]
-        let blacklist: Set<String> = ["audio/flac", "audio/x-flac", "audio/opus", "audio/ogg", "audio/vorbis"]
-
-        if whitelist.contains(contentType) {
-            Logger.player.debug("[RADIO-CODEC] content-type=\(contentType, privacy: .public) → supported")
-            return .supported
-        }
-        if blacklist.contains(contentType) {
-            return .unsupported(contentType: contentType)
-        }
-        Logger.player.debug("[RADIO-CODEC] content-type=\(contentType.isEmpty ? "(empty)" : contentType, privacy: .public) → ambiguous, letting player try")
-        return .ambiguous
-    }
-
-    private func startLiveStreamStallMonitor(stationName: String) {
-        liveStreamStallTask = Task { [weak self] in
-            try? await Task.sleep(for: .seconds(8))
-            guard !Task.isCancelled else { return }
-            guard let self else { return }
-            let (isStillLive, position) = await MainActor.run { (self.state.isLiveStream, self.state.position) }
-            guard isStillLive, position < 1.0 else { return }
-            await self.handleLiveStreamFailure(stationName: stationName, error: nil)
-        }
-    }
-
-    private func handleLiveStreamFailure(stationName: String, error: Error?) async {
-        let isStillLive = await MainActor.run { state.isLiveStream }
-        guard isStillLive else { return }
-
-        Logger.player.error("[RADIO-FAILSAFE] live stream '\(stationName, privacy: .public)' failed: \(error?.localizedDescription ?? "stall timeout", privacy: .public)")
-
-        stopProgressTimer()
-        audioPlayer.stop()
-
-        await MainActor.run {
-            state.currentRadio = nil
-            state.playbackState = .idle
-            toastService.show(
-                "Stream unavailable. The radio may be down or use an unsupported format.",
-                style: .error,
-                duration: 5.0
-            )
-        }
-    }
 
     // MARK: - Smart Shuffle
 
@@ -718,6 +540,18 @@ actor PlayerService: PlayerServiceProtocol {
         }
     }
 
+    func adjustVolume(by delta: Float) async {
+        let newVolume = max(0, min(1, audioPlayer.volume + delta))
+        // Slider feedback for the ⌘↑ / ⌘↓ shortcuts: the full player flashes its volume slider.
+        // Posted here (not in setVolume) so slider drags don't trigger the auto-hide timer.
+        NotificationCenter.default.post(
+            name: .cassetteVolumeChanged,
+            object: nil,
+            userInfo: ["volume": newVolume]
+        )
+        await setVolume(newVolume)
+    }
+
     func replayGainSettingsDidChange() async {
         let (track, config) = await MainActor.run { (state.currentTrack, replayGainSettings.config) }
         await replayGainService?.apply(currentTrack: track, config: config)
@@ -765,11 +599,10 @@ actor PlayerService: PlayerServiceProtocol {
     nonisolated static func shouldAutoExtend(
         isEnabled: Bool,
         repeatMode: RepeatMode,
-        hasRadio: Bool,
         isBuildingInstantMix: Bool,
         remaining: Int
     ) -> Bool {
-        guard isEnabled, repeatMode == .off, !hasRadio, !isBuildingInstantMix else { return false }
+        guard isEnabled, repeatMode == .off, !isBuildingInstantMix else { return false }
         // Trigger threshold : 15 or fewer tracks remaining (including zero — covers singles
         // and starting from the last track of an album).
         return remaining <= 15
@@ -780,14 +613,13 @@ actor PlayerService: PlayerServiceProtocol {
     /// parallel fetches when tracks advance rapidly. Errors are swallowed — natural queue
     /// end is the graceful fallback.
     private func evaluateAutoExtend() async {
-        let (isEnabled, repeatMode, currentRadio, remaining, queueIds, seedTrackId) = await MainActor.run {
+        let (isEnabled, repeatMode, remaining, queueIds, seedTrackId) = await MainActor.run {
             let remaining = state.queue.count - state.currentIndex - 1
-            return (state.isAutoExtendEnabled, state.repeatMode, state.currentRadio, remaining, Set(state.queue.map(\.id)), state.currentTrack?.id)
+            return (state.isAutoExtendEnabled, state.repeatMode, remaining, Set(state.queue.map(\.id)), state.currentTrack?.id)
         }
         guard Self.shouldAutoExtend(
             isEnabled: isEnabled,
             repeatMode: repeatMode,
-            hasRadio: currentRadio != nil,
             isBuildingInstantMix: isBuildingInstantMix,
             remaining: remaining
         ) else { return }
@@ -870,11 +702,6 @@ actor PlayerService: PlayerServiceProtocol {
         cancelFadeTasks()
         finalizePlaySegment()
         audioPlayer.pause()
-        #if os(iOS)
-        sessionActivationRetryTask?.cancel()
-        sessionActivationRetryTask = nil
-        try? AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation)
-        #endif
         await MainActor.run { state.playbackState = .paused }
         await pushPositionSnapshot(rate: 0.0)
         stopProgressTimer()
@@ -895,9 +722,6 @@ actor PlayerService: PlayerServiceProtocol {
             isMutedForRestore = false
         }
         isRestoringSession = false
-        #if os(iOS)
-        configureAudioSessionIfNeeded()
-        #endif
         // Lazily start the accumulator for session-restored tracks that resume for the first time.
         if trackPlayStartDate == nil { trackPlayStartDate = Date() }
         if currentPlaySegmentStart == nil { currentPlaySegmentStart = Date() }
@@ -974,14 +798,7 @@ actor PlayerService: PlayerServiceProtocol {
             audioPlayer.volume = restoredVolume
             isMutedForRestore = false
         }
-        liveStreamStallTask?.cancel()
-        liveStreamStallTask = nil
         audioPlayer.stop()
-        #if os(iOS)
-        sessionActivationRetryTask?.cancel()
-        sessionActivationRetryTask = nil
-        try? AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation)
-        #endif
         accumulatedPlayedSeconds = 0
         currentPlaySegmentStart = nil
         trackPlayStartDate = nil
@@ -992,7 +809,6 @@ actor PlayerService: PlayerServiceProtocol {
         await MainActor.run {
             state.playbackState = .idle
             state.currentTrack = nil
-            state.currentRadio = nil
             state.isSmartShuffleActive = false
             state.originalQueueEndIndex = nil
             state.queue = []
@@ -1009,10 +825,6 @@ actor PlayerService: PlayerServiceProtocol {
         // seek caller (UI, lyrics, lock screen). A malformed seek is a silent no-op — NOT a jump to zero.
         guard position.isFinite else {
             Logger.player.warning("seek ignored — non-finite target")
-            return
-        }
-        guard await MainActor.run(body: { !state.isLiveStream }) else {
-            Logger.player.debug("seek ignored — live stream mode")
             return
         }
         // Cancel any active fade and restore volume — repositioning during a fade
@@ -1032,10 +844,6 @@ actor PlayerService: PlayerServiceProtocol {
     // MARK: - Skip
 
     func skipToNext() async throws {
-        guard await MainActor.run(body: { !state.isLiveStream }) else {
-            Logger.player.debug("skipToNext ignored — live stream mode")
-            return
-        }
         let (queue, currentIndex, repeatMode) = await MainActor.run {
             (state.queue, state.currentIndex, state.repeatMode)
         }
@@ -1055,10 +863,6 @@ actor PlayerService: PlayerServiceProtocol {
     }
 
     func skipToPrevious() async throws {
-        guard await MainActor.run(body: { !state.isLiveStream }) else {
-            Logger.player.debug("skipToPrevious ignored — live stream mode")
-            return
-        }
         let (queue, currentIndex, position) = await MainActor.run {
             (state.queue, state.currentIndex, state.position)
         }
@@ -1074,10 +878,6 @@ actor PlayerService: PlayerServiceProtocol {
     // MARK: - Queue management
 
     func setRepeatMode(_ mode: RepeatMode) async {
-        guard await MainActor.run(body: { !state.isLiveStream }) else {
-            Logger.player.debug("setRepeatMode ignored — live stream mode")
-            return
-        }
         let previousMode = await MainActor.run { state.repeatMode }
         await MainActor.run { state.repeatMode = mode }
         // Activating any loop mode while in the original zone truncates the auto-extended tail.
@@ -1092,10 +892,6 @@ actor PlayerService: PlayerServiceProtocol {
     }
 
     func toggleShuffle() async {
-        guard await MainActor.run(body: { !state.isLiveStream }) else {
-            Logger.player.debug("toggleShuffle ignored — live stream mode")
-            return
-        }
         let isCurrentlyShuffled = await MainActor.run { state.isShuffled }
         if isCurrentlyShuffled {
             await restoreOriginalQueueOrder()
@@ -1129,19 +925,11 @@ actor PlayerService: PlayerServiceProtocol {
     }
 
     func appendToQueue(_ tracks: [DisplayableSong]) async {
-        guard await MainActor.run(body: { !state.isLiveStream }) else {
-            Logger.player.debug("appendToQueue ignored — live stream mode")
-            return
-        }
         await MainActor.run { state.queue.append(contentsOf: tracks) }
         await saveSession()
     }
 
     func playNext(_ songs: [DisplayableSong]) async {
-        guard await MainActor.run(body: { !state.isLiveStream }) else {
-            Logger.player.debug("playNext ignored — live stream mode")
-            return
-        }
         let (queue, currentIndex) = await MainActor.run { (state.queue, state.currentIndex) }
         if queue.isEmpty {
             do {
@@ -1172,9 +960,8 @@ actor PlayerService: PlayerServiceProtocol {
     func addToQueue(_ songs: [DisplayableSong]) async {
         await appendToQueue(songs)
         // appendToQueue is also the silent leaf for background auto-extend, so the confirmation
-        // lives here on the user-facing path. Re-check live stream: appendToQueue no-ops on radio.
-        guard !songs.isEmpty,
-              await MainActor.run(body: { !state.isLiveStream }) else { return }
+        // lives here on the user-facing path.
+        guard !songs.isEmpty else { return }
         await presentQueueConfirmation(
             String(localized: "\(songs.count) songs added to queue"),
             coverArtId: songs.first?.coverArtId
@@ -1192,10 +979,6 @@ actor PlayerService: PlayerServiceProtocol {
     }
 
     func removeFromQueue(at index: Int) async {
-        guard await MainActor.run(body: { !state.isLiveStream }) else {
-            Logger.player.debug("removeFromQueue ignored — live stream mode")
-            return
-        }
         let (queueCount, currentIndex, isShuffled) = await MainActor.run {
             (state.queue.count, state.currentIndex, state.isShuffled)
         }
@@ -1215,10 +998,6 @@ actor PlayerService: PlayerServiceProtocol {
     }
 
     func moveInQueue(fromIndex: Int, toIndex: Int) async {
-        guard await MainActor.run(body: { !state.isLiveStream }) else {
-            Logger.player.debug("moveInQueue ignored — live stream mode")
-            return
-        }
         let (queueCount, currentIndex, isShuffled) = await MainActor.run {
             (state.queue.count, state.currentIndex, state.isShuffled)
         }
@@ -1247,7 +1026,7 @@ actor PlayerService: PlayerServiceProtocol {
 
     // MARK: - Session persistence
 
-    /// Lightweight position-only flush — called from scenePhase .inactive on iOS
+    /// Lightweight position-only flush — called when the app deactivates
     /// to protect the current position against a fast process kill.
     func saveCurrentPosition() async {
         let pos = audioPlayer.progress
@@ -1256,13 +1035,16 @@ actor PlayerService: PlayerServiceProtocol {
     }
 
     private func saveSession() async {
+        let originalQueue = originalQueueOrder
         let snapshot = await MainActor.run {
             SessionPayload(
                 currentIndex: state.currentIndex,
                 currentPosition: state.position,
                 queue: state.queue,
                 currentTrack: state.currentTrack,
-                repeatMode: state.repeatMode
+                repeatMode: state.repeatMode,
+                isShuffled: state.isShuffled,
+                originalQueue: originalQueue
             )
         }
         await sessionService.save(playerState: snapshot)
@@ -1276,11 +1058,17 @@ actor PlayerService: PlayerServiceProtocol {
             state.queue = data.queue
             state.currentIndex = data.currentIndex
             state.currentTrack = track
-            state.currentRadio = nil
             state.position = data.currentPosition
             state.duration = data.currentTrackDuration
             state.repeatMode = data.repeatMode
+            state.isShuffled = data.isShuffled
             state.playbackState = .paused
+        }
+        if data.isShuffled {
+            // Re-arm the pre-shuffle order so toggling shuffle off after a relaunch still
+            // restores the order the user originally queued.
+            originalQueueOrder = data.originalQueue
+            Logger.player.info("[RESTORE] shuffle state restored: on, original order \(data.originalQueue?.count ?? 0) tracks")
         }
 
         // If the saved session was parked at the END of the last track (the queue had finished, repeat off),
@@ -1363,8 +1151,6 @@ actor PlayerService: PlayerServiceProtocol {
             artworkURL: artworkURL,
             artworkHeaders: artworkHeaders,
             coverArtId: track.coverArtId,
-            isLiveStream: false,
-            radioStationName: nil,
             songId: track.id
         ))
         isRestoringSession = false
@@ -1446,8 +1232,8 @@ actor PlayerService: PlayerServiceProtocol {
 
     // MARK: - Scrobble
 
-    /// Cancels any pending playing-now task. Called when switching tracks,
-    /// switching to radio, or stopping. Safe to call when no task is scheduled.
+    /// Cancels any pending playing-now task. Called when switching tracks or stopping.
+    /// Safe to call when no task is scheduled.
     private func cancelPendingScrobble() {
         playingNowTask?.cancel()
         playingNowTask = nil
@@ -1673,13 +1459,6 @@ actor PlayerService: PlayerServiceProtocol {
             }
         }
 
-        #if os(iOS)
-        let outputs = AVAudioSession.sharedInstance().currentRoute.outputs.map { $0.portType }
-        guard !PlayerService.isProblematicRoute(portTypes: outputs) else {
-            Logger.crossfade.debug("skip — AirPlay route (track='\(title, privacy: .public)')")
-            return
-        }
-        #endif
 
         isFadingOut = true
         let userVol = restoredVolume
@@ -1735,24 +1514,6 @@ actor PlayerService: PlayerServiceProtocol {
         }
     }
 
-    #if os(iOS)
-    /// Returns true for routes where crossfade volume ramping sounds wrong or causes artefacts.
-    /// `.airPlay` is the initial entry; add `.bluetoothA2DP` or `.carAudio` here when needed.
-    nonisolated static func isProblematicRoute(portTypes: [AVAudioSession.Port]) -> Bool {
-        let problematic: Set<AVAudioSession.Port> = [.airPlay]
-        return portTypes.contains(where: { problematic.contains($0) })
-    }
-
-    /// Returns true when the route outputs represent a personal listening device whose
-    /// disconnection must auto-pause playback (never continue on the built-in speaker).
-    /// Includes AirPlay/CarPlay so their disconnects keep today's pause behavior.
-    nonisolated static func isPersonalAudioRoute(portTypes: [AVAudioSession.Port]) -> Bool {
-        let personal: Set<AVAudioSession.Port> = [
-            .headphones, .bluetoothA2DP, .bluetoothLE, .bluetoothHFP, .airPlay, .carAudio
-        ]
-        return portTypes.contains(where: { personal.contains($0) })
-    }
-    #endif
 
     // MARK: - Play-time accumulator
 
@@ -1872,11 +1633,6 @@ actor PlayerService: PlayerServiceProtocol {
         stopPositionSaveTimer()
         // The engine is at EOF — stop it (NO parking play) and release the session.
         audioPlayer.stop()
-        #if os(iOS)
-        sessionActivationRetryTask?.cancel()
-        sessionActivationRetryTask = nil
-        try? AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation)
-        #endif
         pendingRestoreInfo = nil
         stoppedAtEndOfQueue = true
 
@@ -1905,7 +1661,7 @@ actor PlayerService: PlayerServiceProtocol {
             guard let info = pendingRestoreInfo else { break }
             pendingRestoreInfo = nil
             // Seek while engine is running — processSource() is a no-op when paused.
-            // Skip if stream is not seekable (Ogg Vorbis, live radio) or position is at start.
+            // Skip if stream is not seekable (e.g. Ogg Vorbis) or position is at start.
             if audioPlayer.isSeekable && info.seekTime > 1 {
                 audioPlayer.seek(to: info.seekTime)
             }
@@ -1930,13 +1686,7 @@ actor PlayerService: PlayerServiceProtocol {
             }
         case .error:
             Logger.player.error("[PLAYER] AudioStreaming entered error state")
-            let isLive = await MainActor.run { state.isLiveStream }
-            if isLive {
-                let name = await MainActor.run { state.currentRadio?.name ?? "" }
-                await handleLiveStreamFailure(stationName: name, error: nil)
-            } else {
-                await MainActor.run { state.playbackState = .error(.timeout) }
-            }
+            await MainActor.run { state.playbackState = .error(.timeout) }
         default:
             break
         }
@@ -1945,13 +1695,7 @@ actor PlayerService: PlayerServiceProtocol {
     /// Called by AudioStreamingDelegate on unexpected errors.
     func handleAudioError(_ error: AudioPlayerError) async {
         Logger.player.error("[PLAYER] AudioStreaming unexpected error: \(error.localizedDescription, privacy: .public)")
-        let isLive = await MainActor.run { state.isLiveStream }
-        if isLive {
-            let name = await MainActor.run { state.currentRadio?.name ?? "" }
-            await handleLiveStreamFailure(stationName: name, error: nil)
-        } else {
-            await MainActor.run { state.playbackState = .error(.timeout) }
-        }
+        await MainActor.run { state.playbackState = .error(.timeout) }
     }
 
     // MARK: - Next track artwork pre-load
@@ -2046,21 +1790,19 @@ actor PlayerService: PlayerServiceProtocol {
             artworkURL: nil,
             artworkHeaders: [:],
             coverArtId: nil,
-            isLiveStream: false,
-            radioStationName: nil,
             songId: track.id
         )
         await nowPlayingService?.update(with: snapshot)
     }
 
     /// Called from the progress timer to keep MPNowPlayingInfoCenter in sync.
-    /// Guards ensure we only push during live playback — not during transitions, live streams,
+    /// Guards ensure we only push during live playback — not during transitions
     /// or when elapsed is out of range — so we never send a stale or impossible position.
     private func periodicNowPlayingPush(elapsed: TimeInterval) async {
-        let (playbackState, duration, isLiveStream, hasTrack) = await MainActor.run {
-            (state.playbackState, state.duration, state.isLiveStream, state.currentTrack != nil)
+        let (playbackState, duration, hasTrack) = await MainActor.run {
+            (state.playbackState, state.duration, state.currentTrack != nil)
         }
-        guard case .playing = playbackState, !isLiveStream, hasTrack else { return }
+        guard case .playing = playbackState, hasTrack else { return }
         guard elapsed >= 0, duration > 0, elapsed <= duration else { return }
         await nowPlayingService?.pushPosition(elapsed: elapsed, rate: 1.0, duration: duration)
     }
@@ -2071,139 +1813,6 @@ actor PlayerService: PlayerServiceProtocol {
     }
 }
 
-// MARK: - iOS Audio Session
-
-#if os(iOS)
-extension PlayerService {
-    func configureAudioSessionIfNeeded() {
-        do {
-            let session = AVAudioSession.sharedInstance()
-            if !audioSessionConfigured {
-                // .playback disables the silent switch and allows background audio.
-                // AirPlay + Bluetooth options enable wireless output without extra entitlements.
-                try session.setCategory(.playback, options: [.allowAirPlay, .allowBluetoothHFP])
-                audioSessionConfigured = true
-            }
-            // Always call setActive(true) — iOS may have deactivated the session during a
-            // background interruption (phone call, Siri, other audio app) even after a
-            // successful initial setup. Without this, resume() silently fails on the lock screen.
-            try session.setActive(true)
-        } catch let error as NSError {
-            if error.code == -50 {
-                // Code=-50: another app holds the session — retry after short delay.
-                Logger.player.warning("AVAudioSession setActive Code=-50, retrying in 0.5s")
-                sessionActivationRetryTask = Task {
-                    try? await Task.sleep(for: .seconds(0.5))
-                    guard !Task.isCancelled else { return }
-                    try? AVAudioSession.sharedInstance().setActive(true)
-                }
-            } else {
-                Logger.player.error("Failed to configure AVAudioSession: \(error, privacy: .public)")
-            }
-        }
-        if interruptionObserver == nil {
-            interruptionObserver = NotificationCenter.default.addObserver(
-                forName: AVAudioSession.interruptionNotification,
-                object: AVAudioSession.sharedInstance(),
-                queue: .main
-            ) { [weak self] notification in
-                guard let self else { return }
-                Task { await self.handleAudioSessionInterruption(notification) }
-            }
-        }
-        if routeChangeObserver == nil {
-            routeChangeObserver = NotificationCenter.default.addObserver(
-                forName: AVAudioSession.routeChangeNotification,
-                object: AVAudioSession.sharedInstance(),
-                queue: .main
-            ) { [weak self] notification in
-                guard let self else { return }
-                guard let reason = notification.userInfo?[AVAudioSessionRouteChangeReasonKey] as? UInt,
-                      let changeReason = AVAudioSession.RouteChangeReason(rawValue: reason) else { return }
-                // AVAudioSessionRouteDescription is not Sendable — extract the previous
-                // route's port types here on the main queue before hopping to the actor.
-                let previousOutputs = (notification.userInfo?[AVAudioSessionRouteChangePreviousRouteKey]
-                    as? AVAudioSessionRouteDescription)?.outputs.map(\.portType) ?? []
-                Task { await self.handleRouteChange(changeReason, previousOutputs: previousOutputs) }
-            }
-        }
-    }
-
-    private func handleAudioSessionInterruption(_ notification: Notification) async {
-        guard let typeValue = notification.userInfo?[AVAudioSessionInterruptionTypeKey] as? UInt,
-              let type = AVAudioSession.InterruptionType(rawValue: typeValue) else { return }
-
-        switch type {
-        case .began:
-            // Record route-disconnect interruptions (AirPods in case) before any early
-            // return — .ended must never auto-resume those onto the built-in speaker.
-            interruptionWasRouteDisconnect = (notification.userInfo?[AVAudioSessionInterruptionReasonKey] as? UInt)
-                .flatMap(AVAudioSession.InterruptionReason.init(rawValue:)) == .routeDisconnected
-            let isPlaying = await MainActor.run { state.playbackState == .playing }
-            guard isPlaying else { return }
-            // Cancel any active crossfade before the OS steals audio focus.
-            cancelFadeTasks()
-            audioPlayer.pause()
-            await MainActor.run { state.playbackState = .paused }
-            stopProgressTimer()
-            await saveSession()
-            let pauseTrack = await MainActor.run { state.currentTrack }
-            if let ws = widgetSyncService {
-                Task { [weak ws] in await ws?.onPlayStateChanged(isPlaying: false, currentSong: pauseTrack) }
-            }
-            Logger.player.info("[INTERRUPTION] began — paused playback")
-
-        case .ended:
-            let shouldResume = (notification.userInfo?[AVAudioSessionInterruptionOptionKey] as? UInt)
-                .flatMap { AVAudioSession.InterruptionOptions(rawValue: $0) }
-                .map { $0.contains(.shouldResume) } ?? false
-            let wasRouteDisconnect = interruptionWasRouteDisconnect
-            interruptionWasRouteDisconnect = false
-            Logger.player.info("[INTERRUPTION] ended — shouldResume=\(shouldResume, privacy: .public) routeDisconnect=\(wasRouteDisconnect, privacy: .public)")
-            if shouldResume && !wasRouteDisconnect {
-                await resume()
-            } else {
-                Logger.player.info("[INTERRUPTION] ended — staying paused")
-            }
-
-        @unknown default:
-            break
-        }
-    }
-
-    // internal: accessible from tests via @testable import
-    func handleRouteChange(
-        _ reason: AVAudioSession.RouteChangeReason,
-        previousOutputs: [AVAudioSession.Port] = []
-    ) async {
-        let outputs = AVAudioSession.sharedInstance().currentRoute.outputs
-            .map { $0.portType.rawValue }
-            .joined(separator: ",")
-        Logger.player.info("[ROUTE] routeChange reason=\(reason.logDescription, privacy: .public) outputs=[\(outputs, privacy: .public)]")
-
-        switch reason {
-        case .oldDeviceUnavailable:
-            // Personal listening device went away (AirPods in case, headphones unplugged).
-            // Do NOT gate on .playing — the routeDisconnected interruption (iOS 17+) may
-            // already have flipped playbackState to .paused while the engine and session
-            // are still primed to resume on the speaker. pause() is idempotent and also
-            // deactivates the session, which is what actually prevents speaker playback.
-            guard previousOutputs.isEmpty
-                || PlayerService.isPersonalAudioRoute(portTypes: previousOutputs) else { break }
-            let hasActiveTrack = await MainActor.run {
-                state.currentTrack != nil && state.playbackState != .idle
-            }
-            if hasActiveTrack { await pause() }
-
-        case .newDeviceAvailable, .routeConfigurationChange:
-            try? AVAudioSession.sharedInstance().setActive(true)
-
-        default:
-            break
-        }
-    }
-}
-#endif
 
 // MARK: - AudioStreamingDelegate
 
@@ -2252,22 +1861,5 @@ final class AudioStreamingDelegate: AudioPlayerDelegate, @unchecked Sendable {
     func audioPlayerDidReadMetadata(player: AudioPlayer, metadata: [String: String]) {}
 }
 
-// MARK: - iOS logging helpers (file-private)
+// MARK: - Logging helpers (file-private)
 
-#if os(iOS)
-private extension AVAudioSession.RouteChangeReason {
-    nonisolated var logDescription: String {
-        switch self {
-        case .unknown: return "unknown"
-        case .newDeviceAvailable: return "newDeviceAvailable"
-        case .oldDeviceUnavailable: return "oldDeviceUnavailable"
-        case .categoryChange: return "categoryChange"
-        case .override: return "override"
-        case .wakeFromSleep: return "wakeFromSleep"
-        case .noSuitableRouteForCategory: return "noSuitableRouteForCategory"
-        case .routeConfigurationChange: return "routeConfigurationChange"
-        @unknown default: return "unknown(\(rawValue))"
-        }
-    }
-}
-#endif

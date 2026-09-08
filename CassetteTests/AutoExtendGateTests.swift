@@ -12,23 +12,23 @@ import Testing
 @Suite("Auto-extend gate")
 struct AutoExtendGateTests {
 
-    @Test("fires when enabled, no loop/radio, and few tracks remain")
+    @Test("fires when enabled, no loop mode, and few tracks remain")
     func firesOnLowRemaining() {
         #expect(PlayerService.shouldAutoExtend(
-            isEnabled: true, repeatMode: .off, hasRadio: false, isBuildingInstantMix: false, remaining: 0
+            isEnabled: true, repeatMode: .off, isBuildingInstantMix: false, remaining: 0
         ))
         #expect(PlayerService.shouldAutoExtend(
-            isEnabled: true, repeatMode: .off, hasRadio: false, isBuildingInstantMix: false, remaining: 15
+            isEnabled: true, repeatMode: .off, isBuildingInstantMix: false, remaining: 15
         ))
     }
 
     @Test("stays quiet while a plentiful queue remains")
     func quietWhenPlentyRemains() {
         #expect(!PlayerService.shouldAutoExtend(
-            isEnabled: true, repeatMode: .off, hasRadio: false, isBuildingInstantMix: false, remaining: 16
+            isEnabled: true, repeatMode: .off, isBuildingInstantMix: false, remaining: 16
         ))
         #expect(!PlayerService.shouldAutoExtend(
-            isEnabled: true, repeatMode: .off, hasRadio: false, isBuildingInstantMix: false, remaining: 99
+            isEnabled: true, repeatMode: .off, isBuildingInstantMix: false, remaining: 99
         ))
     }
 
@@ -37,23 +37,20 @@ struct AutoExtendGateTests {
         // The exact bug: endless already on (isEnabled), seed alone (remaining 0) — must NOT fire
         // while the mix is still being built behind it, or 50 library tracks jump the queue.
         #expect(!PlayerService.shouldAutoExtend(
-            isEnabled: true, repeatMode: .off, hasRadio: false, isBuildingInstantMix: true, remaining: 0
+            isEnabled: true, repeatMode: .off, isBuildingInstantMix: true, remaining: 0
         ))
     }
 
-    @Test("disabled, a loop mode, or an active radio each hold it back")
+    @Test("disabled or a loop mode each hold it back")
     func otherGuards() {
         #expect(!PlayerService.shouldAutoExtend(
-            isEnabled: false, repeatMode: .off, hasRadio: false, isBuildingInstantMix: false, remaining: 0
+            isEnabled: false, repeatMode: .off, isBuildingInstantMix: false, remaining: 0
         ))
         #expect(!PlayerService.shouldAutoExtend(
-            isEnabled: true, repeatMode: .all, hasRadio: false, isBuildingInstantMix: false, remaining: 0
+            isEnabled: true, repeatMode: .all, isBuildingInstantMix: false, remaining: 0
         ))
         #expect(!PlayerService.shouldAutoExtend(
-            isEnabled: true, repeatMode: .one, hasRadio: false, isBuildingInstantMix: false, remaining: 0
-        ))
-        #expect(!PlayerService.shouldAutoExtend(
-            isEnabled: true, repeatMode: .off, hasRadio: true, isBuildingInstantMix: false, remaining: 0
+            isEnabled: true, repeatMode: .one, isBuildingInstantMix: false, remaining: 0
         ))
     }
 }

@@ -105,116 +105,18 @@ struct HomeView: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: CassetteSpacing.xl) {
-                #if os(iOS)
-                if !visiblePinnedItems.isEmpty {
-                    pinnedSection
-                }
-                #endif
-                #if os(iOS)
-                librarySection
-                #endif
-                #if os(macOS)
                 macOSCarousels
-                #else
-                recentlySection
-                #endif
             }
             .padding(.horizontal, CassetteSpacing.l)
             .padding(.top, CassetteSpacing.m)
             .padding(.bottom, CassetteSpacing.xl)
         }
-        .miniPlayerBottomMargin()
         .navigationTitle("Home")
         .toolbar {
-            #if !os(macOS)
-            ToolbarItem(placement: .automatic) {
-                Menu {
-                    Button { showCreatePlaylist = true } label: {
-                        Label("New Playlist", systemImage: "plus")
-                    }
-                    .disabled(!isOnline)
-                    Button { navigateToSettings = true } label: {
-                        Label("Settings", systemImage: "gear")
-                    }
-                } label: {
-                    Image(systemName: "ellipsis")
-                        .font(.title3)
-                        .frame(width: 36, height: 36)
-                }
-                .buttonStyle(.plain)
-            }
-            #endif
         }
         .sheet(isPresented: $showCreatePlaylist) { CreatePlaylistSheet { _ in } }
         .navigationDestination(isPresented: $navigateToSettings) { SettingsView() }
-        #if os(macOS)
         .navigationDestination(isPresented: $navigateToAllAlbums) { AlbumsListView() }
-        #endif
-        #if os(iOS)
-        .navigationDestination(for: HomeDestination.self) { destination in
-            switch destination {
-            case .libraryAlbums:
-                AlbumsListView()
-            case .libraryArtists:
-                ArtistListView()
-            case .librarySongs:
-                SongsListView()
-            case .libraryPlaylists:
-                PlaylistListView(zoomNamespace: playlistZoomNamespace)
-            case .libraryFavorites:
-                FavoritesView()
-            case .libraryDownloads:
-                DownloadedView()
-            case .album(let album):
-                AlbumDetailView(
-                    album: album,
-                    zoomSourceId: album.id,
-                    zoomNamespace: recentlyAddedZoomNamespace,
-                    coverArtId: album.coverArt,
-                    initialDominantColor: colorExtractor.dominantColor(for: album.coverArt ?? album.id, image: nil),
-                    initialCoverImage: artworkImageCache.cachedImage(for: album.coverArt ?? album.id)
-                )
-            case .artist(let artist):
-                ArtistDetailView(artist: artist)
-            case .playlist(let playlist):
-                PlaylistDetailView(
-                    playlist: playlist,
-                    coverArtId: playlist.coverArt ?? playlist.id,
-                    initialCoverImage: artworkImageCache.cachedImage(for: playlist.coverArt ?? playlist.id),
-                    zoomSourceId: playlist.id,
-                    zoomNamespace: playlistZoomNamespace
-                )
-            case .downloadedAlbum(let display):
-                AlbumDetailView(albumId: display.albumId, albumName: display.name, coverArtId: display.coverArtId, mode: .downloadedOnly)
-            case .albumById(let id, let name, _, let coverArtId):
-                AlbumDetailView(
-                    albumId: id,
-                    albumName: name,
-                    zoomSourceId: id,
-                    zoomNamespace: pinnedZoomNamespace,
-                    coverArtId: coverArtId,
-                    initialCoverImage: artworkImageCache.cachedImage(for: coverArtId ?? id)
-                )
-            case .playlistById(let id, let name, let coverArtId):
-                PlaylistDetailView(
-                    playlistId: id,
-                    name: name,
-                    coverArtId: coverArtId,
-                    initialCoverImage: artworkImageCache.cachedImage(for: coverArtId ?? id),
-                    zoomSourceId: id,
-                    zoomNamespace: pinnedZoomNamespace
-                )
-            case .artistById(let id, let name, let coverArtId):
-                ArtistDetailView(artist: ArtistID3(id: id, name: name, coverArt: coverArtId))
-            case .artistBestOf(let id, let name, let coverArtId):
-                ArtistBestOfView(artistId: id, artistName: name, coverArtId: coverArtId)
-            case .offlineArtist(let artist):
-                OfflineArtistAlbumsView(artist: artist)
-            case .offlineAlbum(let album):
-                AlbumDetailView(albumId: album.albumId, albumName: album.albumName, coverArtId: album.coverArtId)
-            }
-        }
-        #endif
         .onAppear { localPinnedItems = allPinnedItems }
         .onChange(of: allPinnedItems.count) { _, _ in localPinnedItems = allPinnedItems }
         .task(id: container?.serverState.isOnline) {
@@ -227,7 +129,6 @@ struct HomeView: View {
 
     // MARK: - macOS carousels
 
-    #if os(macOS)
     @ViewBuilder
     private var macOSCarousels: some View {
         VStack(alignment: .leading, spacing: 32) {
@@ -256,11 +157,7 @@ struct HomeView: View {
                     VStack(alignment: .leading, spacing: 32) {
                         if !vm.recentAlbums.isEmpty {
                             CarouselSection(title: "Recently Added", onSeeAll: {
-                                #if os(macOS)
                                 NotificationCenter.default.post(name: .cassetteSelectAlbums, object: nil)
-                                #else
-                                navigateToAllAlbums = true
-                                #endif
                             }) {
                                 ForEach(vm.recentAlbums) { album in
                                     CarouselAlbumCard(album: album)
@@ -329,7 +226,6 @@ struct HomeView: View {
         }
         .buttonStyle(.plain)
     }
-    #endif
 
     // MARK: - Pinned section
 
@@ -482,7 +378,7 @@ private struct HomePinnedCard: View {
             VStack(alignment: .leading, spacing: CassetteSpacing.xs) {
                 GeometryReader { geo in
                     if PinnedItemType(rawValue: item.itemType) == .playlist {
-                        PlaylistCoverThumbnail(playlistId: item.itemId, serverId: item.serverId, coverArtId: item.coverArtId ?? item.itemId, title: item.displayName, size: geo.size.width)
+                        PlaylistCoverThumbnail(coverArtId: item.coverArtId ?? item.itemId, size: geo.size.width)
                     } else {
                         CoverArtView(id: item.coverArtId ?? item.itemId, size: Int(geo.size.width * 2))
                             .frame(width: geo.size.width, height: geo.size.width)
@@ -603,7 +499,7 @@ private struct HomeDownloadedItemCard: View {
             VStack(alignment: .leading, spacing: CassetteSpacing.xs) {
                 GeometryReader { geo in
                     if item.type == .playlist {
-                        PlaylistCoverThumbnail(playlistId: item.itemId, serverId: nil, coverArtId: item.coverArtId ?? item.itemId, title: item.name, size: geo.size.width)
+                        PlaylistCoverThumbnail(coverArtId: item.coverArtId ?? item.itemId, size: geo.size.width)
                     } else {
                         CoverArtView(id: item.coverArtId ?? item.itemId, size: Int(geo.size.width * 2))
                             .frame(width: geo.size.width, height: geo.size.width)

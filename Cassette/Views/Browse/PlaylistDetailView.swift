@@ -7,9 +7,6 @@ import SwiftUI
 import SwiftSonic
 import SwiftData
 import OSLog
-#if os(iOS)
-import UniformTypeIdentifiers
-#endif
 
 struct PlaylistDetailView: View {
     private let playlistId: String
@@ -74,7 +71,7 @@ struct PlaylistDetailView: View {
 
     @State private var coverRefreshID = UUID()
 
-    // MARK: In-place edit mode (iOS only — macOS keeps EditPlaylistSheet). The detail view becomes the editor:
+    // MARK: In-place edit mode. The detail view becomes the editor:
     // hero → editable cover carousel, title/description → fields, track list (Gate 2) → reorder + multi-select.
     // Reuses the validated PlaylistCoverCarousel + the mutation committer — only the CONTAINER changes.
     @State private var isEditing = false
@@ -90,14 +87,6 @@ struct PlaylistDetailView: View {
     @State private var showDeletePlaylistConfirm = false
     @State private var showRemoveSongsConfirm = false
     @State private var isSaving = false
-    #if os(iOS)
-    @State private var pendingImage: UIImage?
-    @State private var showImageOptions = false
-    @State private var showImagePicker = false
-    @State private var showCamera = false
-    @State private var showFilePicker = false
-    @State private var imageToCrop: CroppableImage?
-    #endif
 
     // Immersive hero geometry (captured from the view; tunable). `heroHeight` = the cover region height; the
     // cover lives in the first SCROLLING row and bleeds under the nav bar via ignoresSafeArea.
@@ -128,11 +117,7 @@ struct PlaylistDetailView: View {
     /// occlude the fixed full-bleed cover as they scroll up over it.
     private var bodyColor: Color {
         if theme.isThemed { return theme.dominantColor }
-        #if canImport(UIKit)
-        return Color(UIColor.systemBackground)
-        #else
         return Color(NSColor.windowBackgroundColor)
-        #endif
     }
 
     /// Header metadata line, Apple-Music style: "N songs · Updated <relative date>".
@@ -260,18 +245,12 @@ struct PlaylistDetailView: View {
             }
         }
         .listStyle(.plain)
-        #if os(iOS)
-        // Edit mode ONLY while editing — nil otherwise. Forcing an editMode binding (even .inactive) in view
-        // mode broke the List's scrolling; nil restores the default (normal scroll) for the read-only view.
-        .environment(\.editMode, isEditing ? Binding.constant(EditMode.active) : nil)
-        #endif
         .scrollContentBackground(.hidden)
         // Extend the scroll content under the transparent nav bar so the first row's cover reaches the
         // screen top (and scrolls up under the bar). The bottom safe area / mini-player margin is preserved.
         .ignoresSafeArea(.container, edges: .top)
         // No soft blur under the nav bar (the cover scrolls under it; the system effect would flicker).
         .cassetteHideTopScrollEdgeEffect()
-        .miniPlayerBottomMargin(bleedsToBottom: true)
         .refreshable { await viewModel?.load() }
         .alert("Remove downloaded playlist?", isPresented: $showDeleteAlert) {
             Button("Remove", role: .destructive) { Task { await viewModel?.deleteDownload() } }
@@ -282,40 +261,6 @@ struct PlaylistDetailView: View {
         .sheet(item: $songToAddToPlaylist) { song in
             AddToPlaylistSheet(song: song)
         }
-        #if os(iOS)
-        // In-place edit cover photo flow (mirrors the create/edit sheets: pick → Apple-Photos crop).
-        .confirmationDialog("Cover Art", isPresented: $showImageOptions, titleVisibility: .visible) {
-            Button("Choose from Library") {
-                DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { showImagePicker = true }
-            }
-            if UIImagePickerController.isSourceTypeAvailable(.camera) {
-                Button("Take a Photo") {
-                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { showCamera = true }
-                }
-            }
-            Button("Browse Files") {
-                DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { showFilePicker = true }
-            }
-            Button("Cancel", role: .cancel) {}
-        }
-        .fullScreenCover(isPresented: $showImagePicker) {
-            ImagePickerController(sourceType: .photoLibrary, allowsEditing: false, onPick: { presentCrop($0) }, onCancel: {})
-                .ignoresSafeArea()
-        }
-        .fullScreenCover(isPresented: $showCamera) {
-            ImagePickerController(sourceType: .camera, allowsEditing: false, onPick: { presentCrop($0) }, onCancel: {})
-                .ignoresSafeArea()
-        }
-        .fullScreenCover(item: $imageToCrop) { croppable in
-            SquareCropView(image: croppable.image, onCrop: { pendingImage = $0; imageToCrop = nil }, onCancel: { imageToCrop = nil })
-        }
-        .fileImporter(isPresented: $showFilePicker, allowedContentTypes: [.jpeg, .png, .heic, .webP], allowsMultipleSelection: false) { result in
-            guard case .success(let urls) = result, let url = urls.first else { return }
-            let accessed = url.startAccessingSecurityScopedResource()
-            defer { if accessed { url.stopAccessingSecurityScopedResource() } }
-            if let data = try? Data(contentsOf: url), let img = UIImage(data: data) { presentCrop(img) }
-        }
-        #endif
         .deletePlaylistConfirmation(
             playlistName: viewModel?.name ?? initialName,
             isPresented: $showDeletePlaylistConfirm,
@@ -373,16 +318,9 @@ struct PlaylistDetailView: View {
         .navigationTitle("")
         .navigationBarTitleDisplayModeInline()
         .navigationBarBackButtonHidden(true)
-        #if os(iOS)
-        .enableSwipeBack()
-        #endif
         .toolbar { toolbarContent }
         // Transparent nav bar so the cover floats under it; adapt the status-bar style to the cover
         // lightness (dark text on a light cover, light text on a dark cover).
-        #if os(iOS)
-        .toolbarBackground(.hidden, for: .navigationBar)
-        .toolbarColorScheme(theme.isThemed ? (theme.isLight ? .light : .dark) : nil, for: .navigationBar)
-        #endif
         // Keyed on connectivity so the list re-loads from the right source when
         // NWPathMonitor flips isOnline — same pattern as PlaylistDetailMacOS.
         .task(id: container?.serverState.isOnline) {
@@ -546,7 +484,7 @@ struct PlaylistDetailView: View {
         return .partiallyDownloaded(downloaded: downloaded, total: total)
     }
 
-    // MARK: - In-place edit header (iOS in-place editor; reuses the validated carousel + fields)
+    // MARK: - In-place edit header (reuses the validated carousel + fields)
 
     private var editHeader: some View {
         VStack(spacing: CassetteSpacing.xl) {
@@ -590,9 +528,6 @@ struct PlaylistDetailView: View {
                 selectedGradient = nil
                 photoIsCover = true
                 coverDirty = true
-                #if os(iOS)
-                showImageOptions = true
-                #endif
             },
             onSelectGradient: { shape in
                 selectedGradient = shape
@@ -603,19 +538,11 @@ struct PlaylistDetailView: View {
     }
 
     private var editShowsPhotoOption: Bool {
-        #if os(iOS)
-        return true
-        #else
         return false
-        #endif
     }
 
     private var editPhotoPreview: PlatformImage? {
-        #if os(iOS)
-        return pendingImage
-        #else
         return nil
-        #endif
     }
 
     /// Enter in-place edit: snapshot the current metadata + cover choice into the working edit state, animate in.
@@ -627,9 +554,6 @@ struct PlaylistDetailView: View {
         selectedGradient = nil
         photoIsCover = false
         coverDirty = false
-        #if os(iOS)
-        pendingImage = nil
-        #endif
         loadEditGradientChoice()
         withAnimation(.smooth) { isEditing = true }
     }
@@ -705,13 +629,6 @@ struct PlaylistDetailView: View {
             store.save(spec, playlistId: playlistId, serverId: serverId, isUserPicked: true)
             return
         }
-        #if os(iOS)
-        if photoIsCover, let image = pendingImage, let data = image.jpegData(compressionQuality: 0.85) {
-            await manager.applyImageCover(data, playlistId: playlistId)
-            // A photo supersedes any gradient choice → drop the stored gradient.
-            store.remove(playlistId: playlistId, serverId: serverId)
-        }
-        #endif
     }
 
     // MARK: - In-place editable track list (Gate 2 — mirrors the edit sheet's reorder + multi-select remove)
@@ -783,14 +700,6 @@ struct PlaylistDetailView: View {
         }
     }
 
-    #if os(iOS)
-    /// Defer presenting the crop screen so the picker fully dismisses first (sequential full-screen covers).
-    private func presentCrop(_ image: UIImage) {
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) {
-            imageToCrop = CroppableImage(image: image)
-        }
-    }
-    #endif
 
     // MARK: - Header
 
@@ -1087,6 +996,7 @@ struct PlaylistSongRows: View {
         if let removeAction = onRemove {
             ForEach(Array(songs.enumerated()), id: \.element.id) { index, song in
                 makeRow(index: index, song: song)
+                    .tag(song.id)
                     .listRowBackground(rowBackground)
             }
             .onDelete { indexSet in
@@ -1098,6 +1008,7 @@ struct PlaylistSongRows: View {
         } else {
             ForEach(Array(songs.enumerated()), id: \.element.id) { index, song in
                 makeRow(index: index, song: song)
+                    .tag(song.id)
                     .listRowBackground(rowBackground)
             }
         }
@@ -1114,8 +1025,6 @@ struct PlaylistSongRows: View {
             .contentShape(Rectangle())
             .onTapGesture { onTap(index) }
             .listRowBackground(Color.clear)
-        #if os(macOS)
         .listRowSeparator(.hidden)
-        #endif
     }
 }

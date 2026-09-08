@@ -29,10 +29,10 @@ protocol PlayerServiceProtocol: AnyObject, Sendable {
     func removeFromQueue(at index: Int) async
     func moveInQueue(fromIndex: Int, toIndex: Int) async
     func restoreSession() async
+    /// Snapshot of the pre-shuffle queue order for session persistence.
+    /// `nil` when shuffle is off or the original order was invalidated by a queue edit.
+    func originalQueueForSession() -> [DisplayableSong]?
     func handleNetworkRestored() async
-    /// Starts live stream playback of an Internet Radio Station.
-    /// Clears the current queue's playing state but preserves the queue itself.
-    func playRadio(_ station: InternetRadioStation) async throws
     /// Builds a Smart Shuffle queue via LibraryService and starts playback. Replaces the current queue.
     /// Throws `CassetteError.smartShuffleEmpty` if no eligible tracks (library too small / no downloads offline).
     func playSmartShuffle() async throws
@@ -49,8 +49,11 @@ protocol PlayerServiceProtocol: AnyObject, Sendable {
     func setAutoExtendEnabled(_ enabled: Bool) async
     /// Applies the given volume (0.0–1.0) to AVPlayer and persists it to UserDefaults.
     func setVolume(_ volume: Float) async
+    /// Steps the volume by `delta` (e.g. ±0.1 for the ⌘↑ / ⌘↓ shortcuts), clamped to 0.0–1.0.
+    /// Reads the live engine volume, so stepping from muted starts at the stepped value.
+    func adjustVolume(by delta: Float) async
     func togglePlayPause() async
-    /// Lightweight position-only flush — called from scenePhase .inactive on iOS.
+    /// Lightweight position-only flush — called when the app deactivates.
     func saveCurrentPosition() async
     /// Re-reads ReplayGainSettings and reapplies gain to the current track.
     /// Call this whenever the user changes any ReplayGain setting.

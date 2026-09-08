@@ -7,9 +7,6 @@ import SwiftUI
 import SwiftData
 import OSLog
 import Foundation
-#if os(iOS)
-import BackgroundTasks
-#endif
 
 @main
 struct CassetteApp: App {
@@ -19,59 +16,16 @@ struct CassetteApp: App {
     // Statics for BGTask handler access — set once after AppContainer init.
     // nonisolated(unsafe) is intentional: the BGTask closure runs off-actor;
     // these are written once on MainActor and read in a non-isolated context.
-    #if os(iOS)
-    nonisolated(unsafe) private static var _bgTaskService: WrappedPlaylistService?
-    nonisolated(unsafe) private static var _bgTaskServerState: ServerState?
-    nonisolated(unsafe) private static var _bgTaskMoodService: MoodPlaylistService?
-    #endif
 
     init() {
-        #if os(iOS)
-        BGTaskScheduler.shared.register(
-            forTaskWithIdentifier: "app.cassette.wrapped.monthly-update",
-            using: nil
-        ) { task in
-            guard let processingTask = task as? BGProcessingTask,
-                  let service = CassetteApp._bgTaskService,
-                  let serverState = CassetteApp._bgTaskServerState else {
-                task.setTaskCompleted(success: false)
-                return
-            }
-            let workTask = Task {
-                let serverId = await MainActor.run { serverState.activeServer?.id.uuidString }
-                guard let serverId else {
-                    processingTask.setTaskCompleted(success: false)
-                    return
-                }
-                let result = await service.runYearlyPlaylistSyncIfNeeded(serverId: serverId, calendar: .current)
-                Logger.wrapped.info("BGTask result: \(String(describing: result), privacy: .public)")
-                // Mood playlists ride along on this task rather than declaring a second identifier:
-                // it already wakes roughly daily, which is the right granularity for "has Wednesday
-                // passed yet", and a new identifier would need an Info.plist entry to match.
-                if let moods = CassetteApp._bgTaskMoodService {
-                    let moodResult = await moods.runWeeklySyncIfNeeded(serverId: serverId, calendar: .current)
-                    Logger.moodPlaylists.info("BGTask result: \(String(describing: moodResult), privacy: .public)")
-                }
-                processingTask.setTaskCompleted(success: true)
-                CassetteApp.scheduleWrappedUpdate()
-            }
-            processingTask.expirationHandler = {
-                workTask.cancel()
-                Logger.wrapped.warning("BGTask expired — rescheduling for tomorrow")
-                CassetteApp.scheduleWrappedUpdate()
-            }
-        }
-        #endif
+        // TEMP-DIAG 诊断1：确认测试进程身份
+        Logger(subsystem: "app.cassette", category: "Diag").notice("DIAG process pid=\(ProcessInfo.processInfo.processIdentifier) bundlePath=\(Bundle.main.bundlePath, privacy: .public)")
+        // Restore the user's global Play/Pause hotkey (system-wide, registered via Carbon).
+        GlobalHotkeyManager.shared.apply(GlobalPlayPauseHotkey.load())
+        // Space = Play/Pause anywhere in the app (text fields and the hotkey recorder pass through).
+        KeyboardInterceptor.install()
     }
 
-    #if os(iOS)
-    static func scheduleWrappedUpdate() {
-        let request = BGProcessingTaskRequest(identifier: "app.cassette.wrapped.monthly-update")
-        request.requiresNetworkConnectivity = true
-        request.earliestBeginDate = Date().addingTimeInterval(24 * 3600)
-        try? BGTaskScheduler.shared.submit(request)
-    }
-    #endif
 
     var body: some Scene {
         WindowGroup {
@@ -95,11 +49,9 @@ struct CassetteApp: App {
             }
             .tint(CassetteColors.accent)
             .onAppear {
-                #if os(macOS)
                 NSApplication.shared.windows
                     .first { $0.title == "Mini Player" }?
                     .close()
-                #endif
             }
             .task {
                 guard container == nil else { return }
@@ -125,72 +77,51 @@ struct CassetteApp: App {
                 Logger.boot.notice("🟡 loadPersistedState() done — activeServer = \(String(describing: newContainer.serverState.activeServer?.baseURL), privacy: .public)")
                 await newContainer.playerService.restoreSession()
                 Task { await runCoverArtGarbageCollection(container: newContainer) }
-                // Cold start fallback: primary trigger for Wrapped updates (BGTask is best-effort).
-                // Fire-and-forget — must never block app launch.
-                Task { await runWrappedUpdate(container: newContainer) }
-                Task { await runMoodUpdate(container: newContainer) }
                 Task { await newContainer.widgetSyncService.fullSync() }
-                #if os(iOS)
-                CassetteApp._bgTaskService = newContainer.wrappedPlaylistService
-                CassetteApp._bgTaskServerState = newContainer.serverState
-                CassetteApp._bgTaskMoodService = newContainer.moodPlaylistService
-                CassetteApp.scheduleWrappedUpdate()
-                #endif
             }
             .task(id: container?.serverState.isOnline) {
                 guard let c = container, c.serverState.isOnline else { return }
                 await c.playerService.handleNetworkRestored()
                 await c.listenBrainzService.flushOfflineQueue()
             }
-            #if os(macOS)
             .frame(minHeight: 580)
             .onReceive(NotificationCenter.default.publisher(for: NSApplication.willTerminateNotification)) { _ in
                 guard let c = container else { return }
                 // Stop AVAudioEngine synchronously — prevents HALC frame accumulation during teardown.
                 c.playerService.stopAudioEngineSync()
-                let sema = DispatchSemaphore(value: 0)
-                Task {
+                // Fire-and-forget the async stops. The old code blocked the main thread on a
+                // semaphore waiting for this Task — but the Task inherits MainActor and stop()
+                // ends on MainActor.run, so the blocked main thread deadlocked it and every quit
+                // burned the full 1.5s timeout. The sync engine stop above covers what matters.
+                Task { [c] in
                     await c.playerService.stop()
                     await c.nowPlayingService.stop()
-                    sema.signal()
                 }
-                let result = sema.wait(timeout: .now() + 1.5)
-                #if DEBUG
-                if result == .timedOut {
-                    Logger.boot.warning("[APP] Terminate handler timed out after 1.5s")
-                }
-                #endif
             }
-            #endif
         }
         .onChange(of: scenePhase) { _, newPhase in
-            #if os(iOS)
-            if newPhase == .inactive, let c = container {
-                Task { await c.playerService.saveCurrentPosition() }
-                Logger.session.info("App inactive — position flushed (iOS kill guard)")
-            }
-            #endif
             guard newPhase == .background, let c = container else { return }
-            let snapshot = SessionPayload(
-                currentIndex: c.playerState.currentIndex,
-                currentPosition: c.playerState.position,
-                queue: c.playerState.queue,
-                currentTrack: c.playerState.currentTrack,
-                repeatMode: c.playerState.repeatMode
-            )
-            Task { await c.sessionService.save(playerState: snapshot) }
+            Task {
+                let snapshot = SessionPayload(
+                    currentIndex: c.playerState.currentIndex,
+                    currentPosition: c.playerState.position,
+                    queue: c.playerState.queue,
+                    currentTrack: c.playerState.currentTrack,
+                    repeatMode: c.playerState.repeatMode,
+                    isShuffled: c.playerState.isShuffled,
+                    originalQueue: await c.playerService.originalQueueForSession()
+                )
+                await c.sessionService.save(playerState: snapshot)
+            }
             Logger.session.info("App backgrounded — session flushed")
         }
-        #if os(macOS)
         .windowStyle(.hiddenTitleBar)
         .windowResizability(.contentMinSize)
         .restorationBehavior(.disabled)
         .commands {
             CassetteCommands()
         }
-        #endif
 
-        #if os(macOS)
         CassetteSettingsScene(container: container)
 
         Window("Mini Player", id: "mini-player") {
@@ -211,7 +142,6 @@ struct CassetteApp: App {
         .defaultSize(width: 320, height: 136)
         .defaultPosition(.topTrailing)
         .restorationBehavior(.disabled)
-        #endif
     }
 
     // MARK: - Cover art garbage collection
@@ -243,31 +173,5 @@ struct CassetteApp: App {
 
         await container.downloadService.garbageCollectOrphanedCovers(referencedIds: referencedIds)
     }
-
-    // MARK: - Wrapped update
-
-    @MainActor
-    private func runWrappedUpdate(container: AppContainer) async {
-        guard let serverId = container.serverState.activeServer?.id.uuidString else { return }
-        await container.wrappedPlaylistService.handleYearTransitionIfNeeded(serverId: serverId, calendar: .current)
-        let result = await container.wrappedPlaylistService.runYearlyPlaylistSyncIfNeeded(serverId: serverId, calendar: .current)
-        Logger.wrapped.info("Cold start result: \(String(describing: result), privacy: .public)")
-    }
-
-    // MARK: - Mood playlists
-
-    /// Cold-start catch-up for the weekly mood refresh. This, not the BGTask, is what users
-    /// actually experience: iOS grants background time at its own discretion, so the refresh lands
-    /// on the first launch on or after Wednesday. A no-op on every other launch.
-    @MainActor
-    private func runMoodUpdate(container: AppContainer) async {
-        guard let serverId = container.serverState.activeServer?.id.uuidString else { return }
-        // Wrapped in a background assertion because this is the one path that can start with
-        // nothing playing: without it, backgrounding the app a second after launch freezes the sync
-        // mid-flight. Progress is per-mood, so an interrupted run still resumes where it stopped.
-        let result = await BackgroundActivity.run("mood-playlists") {
-            await container.moodPlaylistService.runWeeklySyncIfNeeded(serverId: serverId, calendar: .current)
-        }
-        Logger.moodPlaylists.info("Cold start result: \(String(describing: result), privacy: .public)")
-    }
 }
+

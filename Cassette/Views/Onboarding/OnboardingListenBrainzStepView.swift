@@ -135,10 +135,6 @@ struct OnboardingListenBrainzStepView: View {
                 TextField("your-username", text: $vm.usernameInput)
                     .font(.system(.callout, design: .rounded))
                     .autocorrectionDisabled()
-                    #if os(iOS)
-                    .textInputAutocapitalization(.never)
-                    .keyboardType(.asciiCapable)
-                    #endif
                     .onChange(of: vm.usernameInput) { _, _ in
                         vm.validateUsernameInputLocally()
                     }

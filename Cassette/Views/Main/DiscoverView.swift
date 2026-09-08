@@ -12,19 +12,6 @@ struct DiscoverView: View {
     @State private var vm: DiscoverViewModel?
     @Namespace private var recentlyPlayedNS
     @Namespace private var mostPlayedNS
-    @State private var yearlyPlaylists: [WrappedYearlyPlaylist] = []
-    @State private var radioStations: [InternetRadioStation] = []
-    #if os(iOS)
-    @Namespace private var freshReleaseZoomNamespace
-    #else
-    @State private var selectedRelease: AlbumRecommendation?
-    #endif
-    @State private var showAllFreshReleases = false
-    @State private var allReleasesVM: AllFreshReleasesViewModel?
-    @State private var isListenBrainzConnected: Bool = false
-    /// Moods that have a server playlist to open. Empty when AudioMuse is unconfigured or has
-    /// never completed a sync — the section then disappears entirely rather than showing dead tiles.
-    @State private var availableMoods: [(mood: Mood, playlistId: String)] = []
 
     var body: some View {
         ScrollView {
@@ -33,142 +20,31 @@ struct DiscoverView: View {
                     if vm.isErrorState {
                         errorBanner(vm: vm)
                     } else {
-                        freshReleasesSection(vm: vm)
                         recentlyPlayedSection(vm: vm)
                         mostPlayedSection(vm: vm)
                     }
                     smartShuffleSection
-                    moodsSection
-                    wrappedSection
-                    internetRadioSection
                 }
             }
             .padding(.vertical, CassetteSpacing.m)
         }
-        .miniPlayerBottomMargin()
         .cassetteContentWidth()
         .navigationTitle("Discover")
         .task {
             guard let container else { return }
             if vm == nil {
-                vm = DiscoverViewModel(
-                    libraryService: container.libraryService,
-                    recommendationService: container.recommendationService
-                )
-            }
-            if allReleasesVM == nil {
-                allReleasesVM = AllFreshReleasesViewModel(recommendationService: container.recommendationService)
+                vm = DiscoverViewModel(libraryService: container.libraryService)
             }
             await vm?.load()
-            isListenBrainzConnected = await container.listenBrainzService.currentSnapshot().isEnabled
-            await vm?.loadFreshReleases()
-            radioStations = (try? await container.radioService.listStations(forceRefresh: false)) ?? []
-            guard let serverId = container.serverState.activeServer?.id.uuidString else { return }
-            yearlyPlaylists = await container.wrappedPlaylistService.fetchYearlyPlaylists(serverId: serverId)
-            await refreshMoods(serverId: serverId)
         }
         .refreshable {
             await vm?.load(forceRefresh: true)
-            isListenBrainzConnected = await container?.listenBrainzService.currentSnapshot().isEnabled ?? false
-            await vm?.loadFreshReleases()
-            radioStations = (try? await container?.radioService.listStations(forceRefresh: true)) ?? []
         }
-        #if os(iOS)
-        .navigationDestination(for: AlbumRecommendation.self) { release in
-            FreshReleaseDetailView(
-                release: release,
-                providers: container?.externalProvidersStore.load() ?? []
-            )
-            .cassetteZoomTransition(
-                sourceID: release.id ?? "\(release.artistName)-\(release.title)",
-                in: freshReleaseZoomNamespace
-            )
-        }
-        #else
-        .sheet(isPresented: Binding(
-            get: { selectedRelease != nil },
-            set: { if !$0 { selectedRelease = nil } }
-        )) {
-            if let release = selectedRelease {
-                NavigationStack {
-                    FreshReleaseDetailView(release: release, providers: container?.externalProvidersStore.load() ?? [])
-                }
-            }
-        }
-        #endif
-        .navigationDestination(isPresented: $showAllFreshReleases) {
-            if let vm = allReleasesVM {
-                AllFreshReleasesView(vm: vm)
-            }
-        }
-    }
-
-    // MARK: - Moods
-
-    @ViewBuilder
-    private var moodsSection: some View {
-        if !availableMoods.isEmpty {
-            VStack(alignment: .leading, spacing: CassetteSpacing.s) {
-                Text("Moods")
-                    .font(.cassetteSectionTitle)
-                    .padding(.horizontal, CassetteSpacing.m)
-
-                ScrollView(.horizontal, showsIndicators: false) {
-                    LazyHStack(spacing: CassetteSpacing.s) {
-                        ForEach(availableMoods, id: \.mood) { entry in
-                            MoodCard(mood: entry.mood, playlistId: entry.playlistId)
-                        }
-                    }
-                    .padding(.horizontal, CassetteSpacing.m)
-                }
-            }
-        }
-    }
-
-    /// Runs the weekly sync if it is due, then reads back whichever moods now have a playlist.
-    ///
-    /// Deliberately awaited inside the screen's own task rather than fired and forgotten: the sync
-    /// is a no-op on all but one launch a week, and on that launch the section should populate
-    /// before the user scrolls past it.
-    private func refreshMoods(serverId: String) async {
-        guard let service = container?.moodPlaylistService else { return }
-        _ = await BackgroundActivity.run("mood-playlists") {
-            await service.runWeeklySyncIfNeeded(serverId: serverId)
-        }
-        var found: [(mood: Mood, playlistId: String)] = []
-        for mood in Mood.allCases {
-            if let id = await service.playlistId(for: mood, serverId: serverId) {
-                found.append((mood, id))
-            }
-        }
-        availableMoods = found
     }
 
     // MARK: - Sections
 
-    @ViewBuilder
-    private func freshReleasesSection(vm: DiscoverViewModel) -> some View {
-        #if os(iOS)
-        FreshReleasesCard(
-            releases: vm.freshReleases,
-            isLoading: vm.isLoadingFreshReleases,
-            isListenBrainzConnected: isListenBrainzConnected,
-            onSeeAll: { showAllFreshReleases = true },
-            zoomNamespace: freshReleaseZoomNamespace
-        )
-        #else
-        FreshReleasesCard(
-            releases: vm.freshReleases,
-            isLoading: vm.isLoadingFreshReleases,
-            isListenBrainzConnected: isListenBrainzConnected,
-            onSeeAll: { showAllFreshReleases = true },
-            onTap: { release in selectedRelease = release }
-        )
-        #endif
-    }
-
     private func recentlyPlayedSection(vm: DiscoverViewModel) -> some View {
-        #if os(macOS)
         Group {
             if vm.isInitialLoading {
                 section(title: "Recently Played") { skeletonScroll() }
@@ -184,21 +60,9 @@ struct DiscoverView: View {
                 }
             }
         }
-        #else
-        section(title: "Recently Played") {
-            if vm.isInitialLoading {
-                skeletonScroll()
-            } else if vm.recentlyPlayed.isEmpty {
-                emptyStateMessage("No history yet — start playing some tracks.")
-            } else {
-                horizontalAlbumScroll(albums: vm.recentlyPlayed, namespace: recentlyPlayedNS)
-            }
-        }
-        #endif
     }
 
     private func mostPlayedSection(vm: DiscoverViewModel) -> some View {
-        #if os(macOS)
         Group {
             if vm.isInitialLoading {
                 section(title: "Most Played") { skeletonScroll() }
@@ -214,17 +78,6 @@ struct DiscoverView: View {
                 }
             }
         }
-        #else
-        section(title: "Most Played") {
-            if vm.isInitialLoading {
-                skeletonScroll()
-            } else if vm.mostPlayed.isEmpty {
-                emptyStateMessage("No frequent plays yet — your top tracks will appear here.")
-            } else {
-                horizontalAlbumScroll(albums: vm.mostPlayed, namespace: mostPlayedNS)
-            }
-        }
-        #endif
     }
 
     private var smartShuffleSection: some View {
@@ -274,107 +127,6 @@ struct DiscoverView: View {
         return "Smart Shuffle failed. Please try again."
     }
 
-    private var wrappedSection: some View {
-        VStack(alignment: .leading, spacing: CassetteSpacing.s) {
-            HStack {
-                Text("Wrapped")
-                    .font(.cassetteSectionTitle)
-                Spacer(minLength: 0)
-                NavigationLink {
-                    WrappedYearlyListView()
-                } label: {
-                    Text("See all")
-                        .font(.cassetteCaption)
-                        .foregroundStyle(Color.cassetteAccent)
-                }
-                .buttonStyle(.plain)
-            }
-            .padding(.horizontal, CassetteSpacing.m)
-
-            ScrollView(.horizontal, showsIndicators: false) {
-                LazyHStack(spacing: CassetteSpacing.s) {
-                    ForEach(yearlyPlaylists) { playlist in
-                        WrappedYearlyCard(playlist: playlist)
-                    }
-                    if let year = currentYearCardYear {
-                        WrappedCurrentYearCard(year: year)
-                    }
-                    ForEach(currentYearMonths, id: \.month) { item in
-                        WrappedRecapMonthCard(period: .month(year: item.year, month: item.month))
-                    }
-                }
-                .padding(.horizontal, CassetteSpacing.m)
-            }
-        }
-    }
-
-    private var currentYearCardYear: Int? {
-        let year = Calendar.current.component(.year, from: Date())
-        guard !yearlyPlaylists.contains(where: { $0.year == year }) else { return nil }
-        return year
-    }
-
-    private var currentYearMonths: [(year: Int, month: Int)] {
-        let cal = Calendar.current
-        let now = Date()
-        let year = cal.component(.year, from: now)
-        let currentMonth = cal.component(.month, from: now)
-        return (1...currentMonth).reversed().map { (year, $0) }
-    }
-
-    private var internetRadioSection: some View {
-        VStack(alignment: .leading, spacing: CassetteSpacing.s) {
-            HStack {
-                Text("Internet Radio")
-                    .font(.cassetteSectionTitle)
-                Spacer(minLength: 0)
-                NavigationLink {
-                    RadioListView()
-                } label: {
-                    Text("See all")
-                        .font(.cassetteCaption)
-                        .foregroundStyle(Color.cassetteAccent)
-                }
-                .buttonStyle(.plain)
-            }
-            .padding(.horizontal, CassetteSpacing.m)
-
-            if radioStations.isEmpty {
-                NavigationLink {
-                    RadioListView()
-                } label: {
-                    HStack(spacing: CassetteSpacing.s) {
-                        Image(systemName: "antenna.radiowaves.left.and.right")
-                            .font(.title2)
-                            .foregroundStyle(Color.cassetteAccent)
-                        Text("Browse Stations")
-                            .font(.cassetteCellTitle)
-                            .foregroundStyle(.primary)
-                        Spacer(minLength: 0)
-                        Image(systemName: "chevron.right")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                    }
-                    .padding(CassetteSpacing.m)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .background(Color.cassetteAccent.opacity(0.08))
-                    .clipShape(RoundedRectangle(cornerRadius: CassetteCornerRadius.standard, style: .continuous))
-                }
-                .buttonStyle(.plain)
-                .padding(.horizontal, CassetteSpacing.m)
-            } else {
-                ScrollView(.horizontal, showsIndicators: false) {
-                    LazyHStack(spacing: CassetteSpacing.s) {
-                        ForEach(radioStations, id: \.id) { station in
-                            RadioCard(station: station)
-                        }
-                    }
-                    .padding(.horizontal, CassetteSpacing.m)
-                }
-            }
-        }
-    }
-
     // MARK: - Helpers
 
     private func section<Content: View>(title: LocalizedStringKey, @ViewBuilder content: () -> Content) -> some View {
@@ -391,16 +143,7 @@ struct DiscoverView: View {
             LazyHStack(spacing: CassetteSpacing.s) {
                 ForEach(albums, id: \.id) { album in
                     NavigationLink {
-                        #if os(macOS)
                         AlbumDetailMacOS(albumId: album.id, albumName: album.name, coverArtId: album.coverArt)
-                        #else
-                        AlbumDetailView(
-                            album: album,
-                            zoomSourceId: album.id,
-                            zoomNamespace: namespace,
-                            initialCoverImage: artworkImageCache.cachedImage(for: album.coverArt ?? album.id)
-                        )
-                        #endif
                     } label: {
                         AlbumCard(album: album)
                             .cassetteMatchedTransitionSource(id: album.id, in: namespace)

@@ -1,6 +1,6 @@
 // Cassette — Music client for Subsonic/OpenSubsonic servers
 // Copyright (C) 2026 Mathieu Dubart
-// Licensed under the Mozilla Public License 2.0.
+// Licensed under the GNU General Public License v3.0 or later.
 // See LICENSE file in the project root for full license information.
 
 import SwiftUI
@@ -42,22 +42,18 @@ struct LyricsLineView: View {
 
     private var scale: CGFloat {
         guard isSynced, currentIndex != nil else { return 1.0 }
-        return distance == 0 ? 1.05 : 1.0
-    }
-
-    private var lineFont: Font {
-        .system(.title, design: .rounded, weight: .bold)
+        return distance == 0 ? 1.0 : 0.94
     }
 
     var body: some View {
         Text(value)
-            .font(lineFont)
+            .font(.cassetteLyricsLine)
             .multilineTextAlignment(.leading)
             .frame(maxWidth: .infinity, alignment: .leading)
             .foregroundStyle(.white.opacity(opacity))
             .blur(radius: blurRadius)
             .scaleEffect(scale, anchor: .leading)
-            .animation(.easeInOut(duration: 0.25), value: currentIndex)
+            .animation(.smooth(duration: 0.3), value: currentIndex)
             .contentShape(Rectangle())
             .onTapGesture {
                 if isTappable { onTap() }

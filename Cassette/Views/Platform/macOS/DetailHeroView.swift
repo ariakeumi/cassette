@@ -3,7 +3,6 @@
 // Licensed under the Mozilla Public License 2.0.
 // See LICENSE file in the project root for full license information.
 
-#if os(macOS)
 import SwiftUI
 
 struct DetailHeroView: View {
@@ -13,13 +12,16 @@ struct DetailHeroView: View {
     let secondaryLine: String?
     let primaryAction: () -> Void
     let secondaryAction: () -> Void
+    /// Extra top padding for the text column. Detail pages that go full-bleed under the transparent
+    /// toolbar pass an inset so the title clears the floating action buttons in the top-right corner.
+    var contentTopInset: CGFloat = 0
 
     var body: some View {
-        HStack(alignment: .top, spacing: 32) {
+        HStack(alignment: .top, spacing: 20) {
             coverSection
             metadataSection
         }
-        .padding(32)
+        .padding(20)
         .frame(maxWidth: .infinity, alignment: .leading)
         .frame(height: CassetteMacOSLayout.heroHeight)
     }
@@ -40,14 +42,15 @@ struct DetailHeroView: View {
         }
         .frame(width: CassetteMacOSLayout.heroCoverArtSize, height: CassetteMacOSLayout.heroCoverArtSize)
         .clipShape(RoundedRectangle(cornerRadius: 8))
-        .shadow(color: .black.opacity(0.25), radius: 20, y: 8)
+        .shadow(color: .black.opacity(0.25), radius: 12, y: 5)
     }
 
     private var metadataSection: some View {
         VStack(alignment: .leading, spacing: 0) {
             VStack(alignment: .leading, spacing: 6) {
+                Spacer().frame(height: contentTopInset)
                 Text(title)
-                    .font(.system(size: 28, weight: .bold))
+                    .font(.system(size: 22, weight: .bold))
                     .lineLimit(2)
 
                 if let primaryLine {
@@ -74,7 +77,6 @@ struct DetailHeroView: View {
                         .font(.system(size: 13, weight: .semibold))
                 }
                 .buttonStyle(.borderedProminent)
-                .controlSize(.large)
                 .tint(Color.cassetteAccent)
 
                 Button(action: secondaryAction) {
@@ -89,4 +91,3 @@ struct DetailHeroView: View {
         .frame(height: CassetteMacOSLayout.heroCoverArtSize)
     }
 }
-#endif

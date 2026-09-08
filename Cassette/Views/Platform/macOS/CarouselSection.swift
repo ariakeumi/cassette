@@ -3,7 +3,6 @@
 // Licensed under the Mozilla Public License 2.0.
 // See LICENSE file in the project root for full license information.
 
-#if os(macOS)
 import SwiftUI
 
 struct CarouselSection<Content: View>: View {
@@ -38,4 +37,3 @@ struct CarouselSection<Content: View>: View {
         }
     }
 }
-#endif

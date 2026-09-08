@@ -32,8 +32,4 @@ actor SubsonicRecommendationProvider: RecommendationProvider {
         Logger.recommendations.debug("[SUBSONIC] similarArtists: \(results.count, privacy: .public) results (\(results.filter { $0.inLibrary }.count, privacy: .public) in library) for artistId=\(toArtistID, privacy: .public)")
         return results
     }
-
-    func freshReleases(limit: Int, daysWindow: Int) async throws -> [AlbumRecommendation] {
-        []
-    }
 }

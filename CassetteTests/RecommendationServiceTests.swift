@@ -31,10 +31,6 @@ private struct MockRecommendationProvider: RecommendationProvider {
         return artistResults
     }
 
-    func freshReleases(limit: Int, daysWindow: Int) async throws -> [AlbumRecommendation] {
-        if shouldThrow { throw MockError.failure }
-        return albumResults
-    }
 }
 
 // MARK: - Fixtures
@@ -86,38 +82,6 @@ struct RecommendationServiceSimilarArtistsTests {
         var caughtError: Error?
         do {
             _ = try await service.similarArtists(to: "x")
-        } catch {
-            caughtError = error
-        }
-        #expect(caughtError is MockError)
-    }
-}
-
-// MARK: - RecommendationService — freshReleases
-
-@Suite("RecommendationService — freshReleases")
-struct RecommendationServiceFreshReleasesTests {
-
-    @Test("empty provider yields empty")
-    func emptyProviderReturnsEmpty() async throws {
-        let service = RecommendationService(providers: [MockRecommendationProvider()])
-        let results = try await service.freshReleases()
-        #expect(results.isEmpty)
-    }
-
-    @Test("provider with albums returns them")
-    func providerWithAlbumsReturnsData() async throws {
-        let service = RecommendationService(providers: [MockRecommendationProvider(albumResults: [albumStub])])
-        let results = try await service.freshReleases()
-        #expect(results == [albumStub])
-    }
-
-    @Test("throwing provider propagates error")
-    func throwingProviderPropagates() async {
-        let service = RecommendationService(providers: [MockRecommendationProvider(shouldThrow: true)])
-        var caughtError: Error?
-        do {
-            _ = try await service.freshReleases()
         } catch {
             caughtError = error
         }

@@ -63,11 +63,21 @@ extension Notification.Name {
     static let cassetteToggleShuffle = Notification.Name("cassette.toggleShuffle")
     static let cassetteToggleRepeat = Notification.Name("cassette.toggleRepeat")
     static let cassetteToggleQueue = Notification.Name("cassette.toggleQueue")
+    static let cassetteToggleFullScreen = Notification.Name("cassette.toggleFullScreen")
     static let cassetteOpenFullPlayer = Notification.Name("cassette.openFullPlayer")
     static let cassetteOpenFullPlayerLyrics = Notification.Name("cassette.openFullPlayerLyrics")
+    static let cassetteToggleLyrics = Notification.Name("cassette.toggleLyrics")
+    static let cassetteSelectHome   = Notification.Name("cassette.selectHome")
     static let cassetteSelectAlbums = Notification.Name("cassette.selectAlbums")
+    static let cassetteSelectSongs  = Notification.Name("cassette.selectSongs")
+    static let cassetteVolumeUp     = Notification.Name("cassette.volumeUp")
+    static let cassetteVolumeDown   = Notification.Name("cassette.volumeDown")
+    /// Posted by PlayerService.adjustVolume with the new level in userInfo["volume"] (Float 0...1),
+    /// so the full player can flash its volume slider as feedback for the ⌘↑ / ⌘↓ shortcuts.
+    static let cassetteVolumeChanged = Notification.Name("cassette.volumeChanged")
     static let cassetteNavigateToAlbum    = Notification.Name("cassetteNavigateToAlbum")
     static let cassetteNavigateToArtist   = Notification.Name("cassetteNavigateToArtist")
     static let cassetteNavigateToPlaylist = Notification.Name("cassetteNavigateToPlaylist")
     static let cassettePlaylistDeleted    = Notification.Name("cassette.playlistDeleted")
+    static let cassetteOpenPinnedPlaylist = Notification.Name("cassette.openPinnedPlaylist")
 }

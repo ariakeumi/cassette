@@ -8,9 +8,6 @@ import SwiftData
 import SwiftSonic
 import OSLog
 
-#if canImport(UIKit)
-import AVKit
-#endif
 
 private enum PlayerSurface { case player, queue }
 
@@ -47,25 +44,11 @@ struct FullPlayerView: View {
     @State private var lyricsViewModel: LyricsViewModel?
     @Namespace private var morphNS
 
-    #if os(iOS)
-    // MARK: - Player layout knobs (iOS) — eyeball-tunable.
-    /// Player cover cap. Bigger = larger artwork (also width-limited to screenWidth − 2·playerCoverHPadding).
-    private static let playerCoverSize: CGFloat = 340
-    /// Horizontal margin around the cover (smaller = wider cover).
-    private static let playerCoverHPadding: CGFloat = CassetteSpacing.m
-    /// Minimum cover→title gap; the flowing layout's flexible Spacers distribute the rest to fill the screen.
-    private static let playerCoverToTitleGap: CGFloat = CassetteSpacing.xl
-    /// Vertical breathing room between the flowing controls (scrubber ↔ transport ↔ volume). Raise to spread.
-    private static let playerControlsSpacing: CGFloat = CassetteSpacing.l
-    #endif
 
     var body: some View {
         if let playerState = container?.playerState {
-            // Theme from the playing track's cover OR, for a live stream, the radio's cover — so radio surfaces
-            // theme too and the task re-fires between stations (currentTrack is nil for radio).
-            let themeCoverId: String? = playerState.isLiveStream
-                ? playerState.currentRadio?.coverArt
-                : (playerState.currentTrack?.coverArtId ?? playerState.currentTrack?.id)
+            // Theme from the playing track's cover.
+            let themeCoverId: String? = playerState.currentTrack?.coverArtId ?? playerState.currentTrack?.id
             content(playerState)
                 // Key on the cover id AND the user colour override, so picking a colour (e.g. via the album sheet
                 // opened over the player, same track) re-runs updateColors and refreshes the vm-derived text /
@@ -96,9 +79,7 @@ struct FullPlayerView: View {
 
     @ViewBuilder
     private func content(_ playerState: PlayerState) -> some View {
-        let coverArtId = playerState.isLiveStream
-            ? (playerState.currentRadio?.coverArt ?? "")
-            : (playerState.currentTrack?.coverArtId ?? playerState.currentTrack?.id ?? "")
+        let coverArtId = playerState.currentTrack?.coverArtId ?? playerState.currentTrack?.id ?? ""
         // Prefer the already-memoized dominant colour so the page is themed on the FIRST frame (no black flash
         // while the view model's .task resolves); the vm catches up and handles not-yet-cached covers.
         let dominant = colorExtractor.cachedColor(for: coverArtId) ?? vm.dominantColor
@@ -109,27 +90,15 @@ struct FullPlayerView: View {
                      showingQueue: showingQueue)
             .frame(maxWidth: .infinity, maxHeight: .infinity)
             .cassetteContentWidth()
-            #if os(macOS)
-            // macOS keeps the transport in a bottom-pinned safe-area footer (unchanged). On iOS the controls
-            // flow inside surfaceStack so the player cluster can sit high — see surfaceStack.
+            // The transport lives in a bottom-pinned safe-area footer.
             .safeAreaInset(edge: .bottom) {
                 sharedFooter(playerState)
             }
-            #endif
             .environment(\.cassettePlayingAccent, CassetteColors.accentForeground(on: dominant))
         // Solid dominant-color page across all surfaces. The now-playing cover is full-bleed in the slot and
         // melts into this color (like the album/playlist heroes); queue + lyrics sit on the flat color for
         // legibility. A black base shows until the dominant color resolves.
         .background {
-            #if os(iOS)
-            // Solid dominant body colour: the cover touches the top edge (no gap to fill), and its bottom melts
-            // into this flat colour exactly like the album/playlist heroes.
-            ZStack {
-                Color.black
-                dominant
-            }
-            .ignoresSafeArea()
-            #else
             // macOS keeps its blurred cover wash (not in scope for the immersive pass).
             ZStack {
                 Color.black
@@ -145,160 +114,17 @@ struct FullPlayerView: View {
             }
             .drawingGroup()
             .ignoresSafeArea()
-            #endif
         }
     }
 
     /// The two morphing surfaces (player ⇄ queue) plus the transport controls.
     ///
-    /// iOS: the controls FLOW directly under the surfaces (one shared `sharedFooter` instance — NOT
-    /// duplicated). On the player surface the queue collapses to zero height, so the surfaces `ZStack`
-    /// shrinks to the cover+title cluster and the controls rise to sit right under the title, with the slack
-    /// collecting in a trailing Spacer at the bottom. On the queue surface the queue fills, dropping the same
-    /// controls to the bottom. The whole layout (cover fly + crossfade + the controls gliding to their new
-    /// spot) animates on one spring keyed to `surface`.
-    ///
-    /// macOS: unchanged — only the two surfaces live here; the controls stay in the bottom safe-area inset
-    /// applied in `content`.
+    /// Only the two surfaces live here; the controls stay in the bottom safe-area inset applied in
+    /// `content`.
     @ViewBuilder
     private func surfaceStack(_ playerState: PlayerState, coverArtId: String, isPlaying: Bool,
                               showingQueue: Bool) -> some View {
-        #if os(iOS)
-        // Flowing iOS player: cover → title → scrubber → transport → volume flow and FILL the screen, with NO
-        // fixed footer. Lyrics and the queue reuse ONE mechanism — their content takes the cover's slot and
-        // fills it (maxHeight .infinity), pushing the flowing controls below toward the bottom. The mini→full
-        // zoom's matchedGeometry lives in MainTabView; the player↔queue morphCover is gone. The cover FILLS the
-        // upper space full-bleed (album/playlist look), so the slot is the SOLE greedy element and the gaps are
-        // fixed floors that distribute the slack to push the controls down.
-        VStack(spacing: 0) {
-            VStack(spacing: 0) {
-                // Each gap is flexible in the flowing default (distributes the slack so the content fills the
-                // screen) and collapses to a fixed floor once the slot fills — same view type both ways, so it
-                // animates. The slot is then the SOLE greedy element, so it takes the slack and pushes the
-                // controls toward the bottom.
-                // No top gap for the cover (it bleeds to the very top under the grabber); clear the grabber
-                // for lyrics/queue so their content isn't hidden behind it.
-                flowGap((showLyrics || showingQueue) ? 44 : 0)
-
-                // The slot: the cover by default; lyrics or the queue fill it and push the controls down.
-                ZStack {
-                    // Content branches crossfade (lyrics / queue body). The cover is NOT in this if/else — it
-                    // is hoisted below so it never follows a branch's removal (which sent it off-screen).
-                    if showLyrics, let lyricsVM = lyricsViewModel {
-                        LyricsView(viewModel: lyricsVM)
-                            .frame(maxWidth: .infinity)
-                            .padding(.horizontal, 20)
-                            .mask(
-                                LinearGradient(
-                                    stops: [
-                                        .init(color: .clear, location: 0),
-                                        .init(color: .black, location: 0.1),
-                                        .init(color: .black, location: 0.8),
-                                        .init(color: .clear, location: 1)
-                                    ],
-                                    startPoint: .top,
-                                    endPoint: .bottom
-                                )
-                            )
-                            .transition(.opacity)
-                    } else if showingQueue {
-                        flowingQueueContent(playerState)
-                            .transition(.opacity)
-                    }
-
-                    // HOISTED cover: present in BOTH player and queue (removed only for lyrics), so toggling the
-                    // queue never removes it — it FLIES via matchedGeometry between the big player square
-                    // (source when !queue) and the queue header's collapsed cover anchor (source when queue),
-                    // with no off-screen detour or pop. `.transition(.opacity)` is ONLY for the lyrics show/hide.
-                    // Hit testing (cover swipe-to-skip) is off while the queue is up, so the flown cover does
-                    // not intercept the list's scroll/reorder gestures.
-                    if !showLyrics {
-                        flowingCover(playerState, coverArtId: coverArtId, isSource: !showingQueue)
-                            .allowsHitTesting(!showingQueue)
-                            // Bleed the cover up under the grabber to the very top edge (covers the white
-                            // status-bar strip). Safe now that the cover has a DEFINITE frame (GeometryReader):
-                            // the earlier overflow was the greedy frame's unbounded ideal width — proven by
-                            // df4b251, where negative padding alone still overflowed — not ignoresSafeArea.
-                            .ignoresSafeArea(.container, edges: .top)
-                            .transition(.opacity)
-                    }
-                }
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
-
-                flowGap(Self.playerCoverToTitleGap)
-
-                // The queue shows the title in its header on top, so drop this row when the queue is open —
-                // it would otherwise render a SECOND live TrackInfoSection (duplicate @Query, heart/menu, and
-                // sheet hosts), not just a duplicate title.
-                if !showingQueue {
-                    TrackInfoSection(
-                        playerState: playerState,
-                        container: container,
-                        contentColor: vm.contentColor,
-                        secondaryContentColor: vm.secondaryContentColor
-                    )
-                    .padding(.horizontal, CassetteSpacing.l)
-                }
-
-                if !playerState.isLiveStream {
-                    ScrubberView(
-                        playerState: playerState,
-                        playerService: container?.playerService,
-                        contentColor: vm.contentColor,
-                        secondaryContentColor: vm.secondaryContentColor
-                    )
-                    .padding(.horizontal, CassetteSpacing.l)
-                    .padding(.top, CassetteSpacing.m)
-                    .disabled(!playerState.isPlaybackAvailable)
-                    .opacity(playerState.isPlaybackAvailable ? 1.0 : 0.4)
-                }
-
-                PlaybackControlsView(
-                    playerState: playerState,
-                    playerService: container?.playerService,
-                    isPlaybackAvailable: playerState.isPlaybackAvailable,
-                    contentColor: vm.contentColor,
-                    secondaryContentColor: vm.secondaryContentColor
-                )
-                // Breathing room between scrubber → transport → volume — the `playerControlsSpacing` knob.
-                .padding(.top, Self.playerControlsSpacing)
-
-                if dynamicTypeSize < .accessibility1 {
-                    VolumeSection(contentColor: vm.contentColor, secondaryContentColor: vm.secondaryContentColor)
-                        .padding(.horizontal, CassetteSpacing.l)
-                        .padding(.top, Self.playerControlsSpacing)
-                }
-
-                // Default player: a taller bottom gap shortens the greedy cover and lifts the controls up.
-                flowGap((showLyrics || showingQueue) ? CassetteSpacing.xs : 40)
-            }
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
-            // One animation for the whole flowing reflow, keyed to the surface / lyrics toggles only, so the
-            // gaps, the slot fill, and the controls all glide together (the queue toggle has no withAnimation).
-            .animation(.smooth(duration: 0.3), value: showLyrics)
-            .animation(.smooth(duration: 0.3), value: surface)
-
-            BottomToolbar(
-                showLyrics: $showLyrics,
-                surface: $surface,
-                isLiveStream: playerState.isLiveStream,
-                secondaryContentColor: vm.secondaryContentColor,
-                accentColor: CassetteColors.accentForeground(on: vm.dominantColor),
-                playerState: playerState
-            )
-            .padding(.top, CassetteSpacing.s)
-            // Fixed bottom margin (NOT a Spacer): a greedy Spacer here would compete with the inner VStack's
-            // maxHeight .infinity and split the slack, leaving a void below the toolbar in every state.
-            .padding(.bottom, CassetteSpacing.l)
-        }
-        // The grabber floats OVER the cover (which now bleeds to the very top), like the album/playlist nav bar.
-        .overlay(alignment: .top) {
-            topBar
-                .padding(.top, CassetteSpacing.s)
-        }
-        #else
-        // Morph keyed to `surface` ONLY; Reduce Motion degrades to a plain opacity crossfade. macOS-only — the
-        // iOS player↔queue uses its own .smooth reflow (below).
+        // Morph keyed to `surface` ONLY; Reduce Motion degrades to a plain opacity crossfade.
         let morphAnimation: Animation = reduceMotion
             ? .easeInOut(duration: 0.22)
             : .spring(response: 0.45, dampingFraction: 0.82)
@@ -307,11 +133,9 @@ struct FullPlayerView: View {
                 .padding(.top, CassetteSpacing.s)
 
             ZStack {
-                if !playerState.isLiveStream {
-                    queueSurface(playerState, coverArtId: coverArtId)
-                        .opacity(showingQueue ? 1 : 0)
-                        .allowsHitTesting(showingQueue)
-                }
+                queueSurface(playerState, coverArtId: coverArtId)
+                    .opacity(showingQueue ? 1 : 0)
+                    .allowsHitTesting(showingQueue)
                 playerSurface(playerState, coverArtId: coverArtId, isPlaying: isPlaying)
                     .opacity(showingQueue ? 0 : 1)
                     .allowsHitTesting(!showingQueue)
@@ -319,150 +143,27 @@ struct FullPlayerView: View {
             .frame(maxWidth: .infinity, maxHeight: .infinity)
             .animation(morphAnimation, value: surface)
         }
-        #endif
     }
 
-    #if os(iOS)
-    /// A fixed-height vertical gap (`floor`) in the flowing layout. The slot above is the sole greedy element,
-    /// so it absorbs the slack and pushes the controls toward the bottom; these gaps stay a constant floor.
-    private func flowGap(_ floor: CGFloat) -> some View {
-        Color.clear.frame(minHeight: floor, maxHeight: floor)
-    }
-
-    /// The default player cover — FILLS the upper space full-bleed (album/playlist look), melting into the
-    /// dominant color at the bottom. No `morphCover` — the mini→full zoom matchedGeometry lives in MainTabView;
-    /// the `queueCover` matchedGeometry flies the cover to the queue header on queue toggle.
-    private func flowingCover(_ playerState: PlayerState, coverArtId: String, isSource: Bool) -> some View {
-        GeometryReader { geo in
-            // Memoized dominant so the melt's colour appears on the FIRST frame, in sync with the page background.
-            let dominant = colorExtractor.cachedColor(for: coverArtId) ?? vm.dominantColor
-            CoverArtView(id: coverArtId, size: 1000)
-                // DEFINITE size from the geometry — NOT maxWidth/maxHeight .infinity. A greedy frame reports an
-                // unbounded ideal width which, flattened by drawingGroup, widened the slot and pushed the
-                // controls off-screen. Flexible (nil) on the queue side so matchedGeometry shrinks it to 56pt.
-                // Fill the width and run slightly TALLER than square (1.12×) so the cover has more presence and
-                // its bottom melt starts lower down the screen. Definite size (not greedy) keeps the controls placed.
-                .frame(width: isSource ? min(geo.size.width, geo.size.height) : nil, height: isSource ? min(geo.size.width, geo.size.height) * 1.20 : nil)
-                // Rounded corners on the small flown cover in the queue header; sharp full-bleed on the player.
-                .clipShape(RoundedRectangle(cornerRadius: isSource ? 0 : CassetteCornerRadius.standard))
-                // Light blurred melt at the bottom: a thin strip of the cover blurs and fades into the dominant
-                // body colour, so the cover dissolves into the body (same recipe as album/playlist).
-                .overlay {
-                    if isSource {
-                        ZStack {
-                            // Blurred copy from the shared artwork cache (instant — the sharp cover already
-                            // warmed it) instead of a fresh per-track download via the view model.
-                            CoverArtView(id: coverArtId, size: 1000)
-                                .frame(maxWidth: .infinity, maxHeight: .infinity)
-                                .blur(radius: 16)
-                                .clipped()
-                            LinearGradient(
-                                stops: [
-                                    .init(color: .clear, location: 0.82),
-                                    .init(color: dominant, location: 1.0),
-                                ],
-                                startPoint: .top, endPoint: .bottom
-                            )
-                        }
-                        .mask(
-                            LinearGradient(
-                                stops: [
-                                    .init(color: .clear, location: 0.84),
-                                    .init(color: .black, location: 1.0),
-                                ],
-                                startPoint: .top, endPoint: .bottom
-                            )
-                        )
-                        .allowsHitTesting(false)
-                    }
-                }
-                .drawingGroup()
-                // Cover-fly endpoint (player side): flies to/from the queue header's 56pt anchor on queue toggle.
-                // Distinct id + namespace from the mini→full zoom (MainTabView's `playerZoom`).
-                .matchedGeometryEffect(id: "queueCover", in: morphNS, isSource: isSource)
-                // Top-aligned so the cover reaches the very top edge of the screen (no gap above), like the
-                // album/playlist hero; its bottom melts into the dominant body colour below.
-                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
-        }
-    }
-
-    /// The queue rehosted on the flowing mechanism: a collapsed cover+title header on top (NO morphCover — the
-    /// player↔queue morph is gone), the queue pills, the scrollable reorder list that fills the slot, and the
-    /// status line. The header carries the title, so the duplicate title below is dropped in surfaceStack.
-    private func flowingQueueContent(_ playerState: PlayerState) -> some View {
-        VStack(spacing: 0) {
-            HStack(spacing: CassetteSpacing.m) {
-                // Invisible 56pt ANCHOR — the cover-fly's queue endpoint (isSource: true on the queue side).
-                // The VISIBLE cover is the hoisted one in surfaceStack, which flies HERE; a second visible
-                // cover here would duplicate it, so this just reserves the header's cover slot.
-                Color.clear
-                    .frame(width: 56, height: 56)
-                    .matchedGeometryEffect(id: "queueCover", in: morphNS, isSource: true)
-
-                TrackInfoSection(
-                    playerState: playerState,
-                    container: container,
-                    contentColor: vm.contentColor,
-                    secondaryContentColor: vm.secondaryContentColor,
-                    compact: true
-                )
-            }
-            .padding(.horizontal, CassetteSpacing.l)
-            .padding(.top, CassetteSpacing.s)
-
-            queuePills(playerState)
-                .padding(.horizontal, CassetteSpacing.l)
-                .padding(.vertical, CassetteSpacing.m)
-
-            upNextHeader(playerState)
-                .padding(.horizontal, CassetteSpacing.l)
-                .padding(.bottom, CassetteSpacing.xs)
-
-            InlineQueueList(
-                playerState: playerState,
-                contentColor: vm.contentColor,
-                secondaryContentColor: vm.secondaryContentColor,
-                // Only mounted while the queue is shown (no opacity-0 pre-mount), so always load artwork.
-                loadArtwork: true
-            )
-            // The iOS reorder grip is the system edit-mode control — pin its light/dark rendering to the
-            // cover's luminance so it stays legible in lockstep with the row text on every cover.
-            .environment(\.colorScheme, vm.isLightBackground ? .light : .dark)
-            .frame(maxWidth: .infinity, minHeight: 120, maxHeight: .infinity)
-
-            queueStatusLine(playerState)
-                .padding(.horizontal, CassetteSpacing.l)
-                .padding(.vertical, CassetteSpacing.s)
-        }
-    }
-    #endif
 
     // MARK: - Surfaces
 
-    /// Whether the queue surface is the currently-visible one (always false for live streams, which have
-    /// no queue). Drives the matchedGeometry `isSource` so the source always belongs to an in-tree view.
+    /// Whether the queue surface is the currently-visible one. Drives the matchedGeometry `isSource`
+    /// so the source always belongs to an in-tree view.
     private func isQueueVisible(_ playerState: PlayerState) -> Bool {
-        surface == .queue && !playerState.isLiveStream
+        surface == .queue
     }
 
     /// Player state: centered album art (or lyrics) + track info. The transport chrome lives in the
     /// shared footer (anchored), so only this region differs between player and queue.
     @ViewBuilder
     private func playerSurface(_ playerState: PlayerState, coverArtId: String, isPlaying: Bool) -> some View {
-        // iOS: cover + title sized/spaced by the layout knobs at the top of the struct; the controls FLOW
-        // under this surface (see surfaceStack), with a flexible gap there distributing the slack so the cover
-        // fills the top and the controls sit in the lower-middle. macOS keeps its prior values and distributes
-        // slack with the Spacers below (the cover→title gap, and the capped title→controls gap — the knob).
-        #if os(iOS)
-        let coverCap = Self.playerCoverSize
-        let coverHPadding = Self.playerCoverHPadding
-        let coverTitleSpacing = Self.playerCoverToTitleGap
-        #else
+        // Cover + title sized/spaced by the layout knobs at the top of the struct; slack is distributed
+        // with the Spacers below (the cover→title gap, and the capped title→controls gap — the knob).
         let coverCap: CGFloat = 360
         let coverHPadding = CassetteSpacing.l
         let coverTitleSpacing = CassetteSpacing.s
         let titleToControlsGap: CGFloat = 8
-        #endif
         VStack(spacing: coverTitleSpacing) {
             // Artwork starts high — just below the grabber (Apple-Music-like top alignment). The lyrics state
             // keeps its fill (see the maxHeight below), left as-is.
@@ -488,7 +189,7 @@ struct FullPlayerView: View {
                 } else {
                     Color.clear
                         .aspectRatio(1, contentMode: .fit)
-                        // Cover cap — sized by the iOS layout knobs (playerCoverSize); macOS keeps 360.
+                        // Cover cap.
                         .frame(maxWidth: coverCap)
                         .overlay {
                             CoverArtView(id: coverArtId, size: 600)
@@ -514,10 +215,8 @@ struct FullPlayerView: View {
             .frame(maxWidth: .infinity, maxHeight: showLyrics ? CGFloat.infinity : nil)
             .animation(.smooth(duration: 0.3), value: showLyrics)
 
-            // macOS only: distribute slack above the title (iOS packs the cluster at the top instead).
-            #if os(macOS)
+            // Distribute slack above the title.
             if !showLyrics { Spacer(minLength: 0) }
-            #endif
 
             TrackInfoSection(
                 playerState: playerState,
@@ -527,11 +226,8 @@ struct FullPlayerView: View {
             )
             .padding(.horizontal, CassetteSpacing.l)
 
-            // macOS only: cap the bottom Spacer so the title hugs the bottom-pinned footer. On iOS the
-            // controls already flow right under the title (no Spacer), with the slack below them.
-            #if os(macOS)
+            // Cap the bottom Spacer so the title hugs the bottom-pinned footer.
             if !showLyrics { Spacer(minLength: 0).frame(maxHeight: titleToControlsGap) }
-            #endif
         }
         .padding(.top, CassetteSpacing.s)
         .padding(.bottom, CassetteSpacing.s)
@@ -561,7 +257,7 @@ struct FullPlayerView: View {
                 // Mounted at opacity 0 for the morph — defer row artwork until the queue is actually shown.
                 loadArtwork: isQueueVisible(playerState)
             )
-            // The iOS reorder grip is the system edit-mode control — not directly recolorable, but its
+            // The system reorder grip is not directly recolorable, but its
             // light/dark rendering can be pinned to the cover's luminance (the same isLightBackground
             // signal that drives contentColor). Light cover -> .light -> dark grip; dark cover -> .dark ->
             // light grip — so the grip stays legible in lockstep with the row text on every cover.
@@ -666,22 +362,20 @@ struct FullPlayerView: View {
     }
 
     /// Scrubber + transport + volume + bottom toolbar — one instance anchored across both surfaces, so
-    /// its `@State` / UIKit-backed children are never re-created by the surface toggle.
+    /// its `@State` / AppKit-backed children are never re-created by the surface toggle.
     @ViewBuilder
     private func sharedFooter(_ playerState: PlayerState) -> some View {
         VStack(spacing: 0) {
-            if !playerState.isLiveStream {
-                ScrubberView(
-                    playerState: playerState,
-                    playerService: container?.playerService,
-                    contentColor: vm.contentColor,
-                    secondaryContentColor: vm.secondaryContentColor
-                )
-                .padding(.horizontal, CassetteSpacing.l)
-                .padding(.top, CassetteSpacing.m)
-                .disabled(!playerState.isPlaybackAvailable)
-                .opacity(playerState.isPlaybackAvailable ? 1.0 : 0.4)
-            }
+            ScrubberView(
+                playerState: playerState,
+                playerService: container?.playerService,
+                contentColor: vm.contentColor,
+                secondaryContentColor: vm.secondaryContentColor
+            )
+            .padding(.horizontal, CassetteSpacing.l)
+            .padding(.top, CassetteSpacing.m)
+            .disabled(!playerState.isPlaybackAvailable)
+            .opacity(playerState.isPlaybackAvailable ? 1.0 : 0.4)
 
             PlaybackControlsView(
                 playerState: playerState,
@@ -701,7 +395,6 @@ struct FullPlayerView: View {
             BottomToolbar(
                 showLyrics: $showLyrics,
                 surface: $surface,
-                isLiveStream: playerState.isLiveStream,
                 secondaryContentColor: vm.secondaryContentColor,
                 accentColor: CassetteColors.accentForeground(on: vm.dominantColor),
                 playerState: playerState
@@ -758,7 +451,7 @@ private struct TrackInfoSection: View {
     var body: some View {
         HStack(alignment: .top, spacing: CassetteSpacing.m) {
             VStack(alignment: .leading, spacing: CassetteSpacing.xs) {
-                Text(playerState.isLiveStream ? (playerState.currentRadio?.name ?? "") : (playerState.currentTrack?.title ?? ""))
+                Text(playerState.currentTrack?.title ?? "")
                     .font(compact ? .cassetteSectionTitle : .title2)
                     .fontWeight(compact ? .semibold : .bold)
                     .foregroundStyle(contentColor)
@@ -768,11 +461,6 @@ private struct TrackInfoSection: View {
                 if !playerState.isPlaybackAvailable {
                     Label("Reconnect to resume", systemImage: "wifi.slash")
                         .font(.callout)
-                        .foregroundStyle(secondaryContentColor)
-                        .lineLimit(1)
-                } else if playerState.isLiveStream {
-                    Text("Live Radio")
-                        .font(.subheadline)
                         .foregroundStyle(secondaryContentColor)
                         .lineLimit(1)
                 } else {
@@ -802,53 +490,49 @@ private struct TrackInfoSection: View {
             .contentShape(Rectangle())
 
             HStack(spacing: CassetteSpacing.s) {
-                if !playerState.isLiveStream {
-                    Button {
-                        HapticFeedback.light.trigger()
-                        let fav = isFavorite
-                        let songId = playerState.currentTrack?.id ?? ""
-                        Task {
-                            if fav {
-                                try? await container?.favoritesService.unstar(itemType: .song, itemId: songId)
-                            } else {
-                                try? await container?.favoritesService.star(itemType: .song, itemId: songId)
-                            }
+                Button {
+                    HapticFeedback.light.trigger()
+                    let fav = isFavorite
+                    let songId = playerState.currentTrack?.id ?? ""
+                    Task {
+                        if fav {
+                            try? await container?.favoritesService.unstar(itemType: .song, itemId: songId)
+                        } else {
+                            try? await container?.favoritesService.star(itemType: .song, itemId: songId)
                         }
-                    } label: {
-                        Image(systemName: isFavorite ? "star.fill" : "star")
-                            .font(.title3)
-                            .foregroundStyle(contentColor)
-                            .cassetteHeroButton(size: 44)
                     }
-                    .buttonStyle(.plain)
-                    .disabled(!isOnline)
-                    .accessibilityLabel(isFavorite ? "Remove from Favorites" : "Add to Favorites")
+                } label: {
+                    Image(systemName: isFavorite ? "star.fill" : "star")
+                        .font(.title3)
+                        .foregroundStyle(contentColor)
+                        .cassetteHeroButton(size: 44)
                 }
+                .buttonStyle(.plain)
+                .disabled(!isOnline)
+                .accessibilityLabel(isFavorite ? "Remove from Favorites" : "Add to Favorites")
 
                 Menu {
-                    if !playerState.isLiveStream {
-                        Button("Go to Album", systemImage: "square.stack") {
-                            guard playerState.currentTrack?.albumId != nil else { return }
-                            showAlbumSheet = true
-                        }
-                        .disabled(playerState.currentTrack?.albumId == nil || !isOnline)
-                        Button("Go to Artist", systemImage: "music.mic") {
-                            goToArtist()
-                        }
-                        .disabled(playerState.currentTrack?.artist == nil || !isOnline)
-                        Divider()
-                        Button("Add to Playlist...", systemImage: "music.note.list") {
-                            songToAddToPlaylist = playerState.currentTrack
-                        }
-                        .disabled(!isOnline || playerState.currentTrack == nil)
-                        Divider()
-                        Button("Instant Mix", systemImage: instantMixSymbol) {
-                            guard let track = playerState.currentTrack else { return }
-                            startInstantMix(from: .song(id: track.id), using: container, startingWith: track)
-                        }
-                        .disabled(!isOnline || playerState.currentTrack == nil)
-                        Divider()
+                    Button("Go to Album", systemImage: "square.stack") {
+                        guard playerState.currentTrack?.albumId != nil else { return }
+                        showAlbumSheet = true
                     }
+                    .disabled(playerState.currentTrack?.albumId == nil || !isOnline)
+                    Button("Go to Artist", systemImage: "music.mic") {
+                        goToArtist()
+                    }
+                    .disabled(playerState.currentTrack?.artist == nil || !isOnline)
+                    Divider()
+                    Button("Add to Playlist...", systemImage: "music.note.list") {
+                        songToAddToPlaylist = playerState.currentTrack
+                    }
+                    .disabled(!isOnline || playerState.currentTrack == nil)
+                    Divider()
+                    Button("Instant Mix", systemImage: instantMixSymbol) {
+                        guard let track = playerState.currentTrack else { return }
+                        startInstantMix(from: .song(id: track.id), using: container, startingWith: track)
+                    }
+                    .disabled(!isOnline || playerState.currentTrack == nil)
+                    Divider()
                     Button {
                         Task { await triggerSmartShuffle() }
                     } label: {
@@ -868,13 +552,7 @@ private struct TrackInfoSection: View {
             if let track = playerState.currentTrack,
                let albumId = track.albumId,
                let albumName = track.albumName {
-                #if os(macOS)
                 AlbumDetailMacOS(albumId: albumId, albumName: albumName, coverArtId: track.coverArtId)
-                #else
-                NavigationStack {
-                    AlbumDetailView(albumId: albumId, albumName: albumName, coverArtId: track.coverArtId)
-                }
-                #endif
             }
         }
         .sheet(item: $songToAddToPlaylist) { song in
@@ -1096,19 +774,17 @@ private struct PlaybackControlsView: View {
 
     var body: some View {
         HStack(spacing: CassetteSpacing.xxxxl) {
-            if !playerState.isLiveStream {
-                Button {
-                    HapticFeedback.light.trigger()
-                    Task { try? await playerService?.skipToPrevious() }
-                } label: {
-                    Image(systemName: "backward.fill")
-                        .font(.title)
-                        .foregroundStyle(contentColor)
-                        .frame(width: 56, height: 56)
-                }
-                .disabled(!isPlaybackAvailable)
-                .accessibilityLabel("Skip to previous")
+            Button {
+                HapticFeedback.light.trigger()
+                Task { try? await playerService?.skipToPrevious() }
+            } label: {
+                Image(systemName: "backward.fill")
+                    .font(.title)
+                    .foregroundStyle(contentColor)
+                    .frame(width: 56, height: 56)
             }
+            .disabled(!isPlaybackAvailable)
+            .accessibilityLabel("Skip to previous")
 
             Button {
                 HapticFeedback.medium.trigger()
@@ -1128,19 +804,17 @@ private struct PlaybackControlsView: View {
             .disabled(!isPlaybackAvailable)
             .accessibilityLabel(playerState.playbackState == .playing ? "Pause" : "Play")
 
-            if !playerState.isLiveStream {
-                Button {
-                    HapticFeedback.light.trigger()
-                    Task { try? await playerService?.skipToNext() }
-                } label: {
-                    Image(systemName: "forward.fill")
-                        .font(.title)
-                        .foregroundStyle(contentColor)
-                        .frame(width: 56, height: 56)
-                }
-                .disabled(!isPlaybackAvailable)
-                .accessibilityLabel("Skip to next")
+            Button {
+                HapticFeedback.light.trigger()
+                Task { try? await playerService?.skipToNext() }
+            } label: {
+                Image(systemName: "forward.fill")
+                    .font(.title)
+                    .foregroundStyle(contentColor)
+                    .frame(width: 56, height: 56)
             }
+            .disabled(!isPlaybackAvailable)
+            .accessibilityLabel("Skip to next")
         }
     }
 }
@@ -1150,81 +824,60 @@ private struct PlaybackControlsView: View {
 private struct BottomToolbar: View {
     @Binding var showLyrics: Bool
     @Binding var surface: PlayerSurface
-    let isLiveStream: Bool
     let secondaryContentColor: Color
     let accentColor: Color
     let playerState: PlayerState
 
     var body: some View {
         HStack(spacing: CassetteSpacing.xxxxl) {
-            if !isLiveStream {
-                Button {
-                    if surface == .queue { surface = .player }
-                    withAnimation(.smooth(duration: 0.3)) { showLyrics.toggle() }
-                } label: {
-                    Image(systemName: "quote.bubble")
-                        .font(.title3)
-                        .foregroundStyle(showLyrics && surface == .player ? accentColor : secondaryContentColor)
-                        .frame(width: 44, height: 44)
-                }
-                .buttonStyle(.borderless)
-                .accessibilityLabel("Lyrics")
+            Button {
+                if surface == .queue { surface = .player }
+                withAnimation(.smooth(duration: 0.3)) { showLyrics.toggle() }
+            } label: {
+                Image(systemName: "quote.bubble")
+                    .font(.title3)
+                    .foregroundStyle(showLyrics && surface == .player ? accentColor : secondaryContentColor)
+                    .frame(width: 44, height: 44)
             }
+            .buttonStyle(.borderless)
+            .accessibilityLabel("Lyrics")
 
             AirPlayRouteButton(tintColor: secondaryContentColor)
                 .frame(width: 44, height: 44)
 
-            if !isLiveStream {
-                Button {
-                    // Phase 1: instant surface toggle (no morph animation).
-                    if surface == .queue {
-                        surface = .player
-                    } else {
-                        surface = .queue
-                        showLyrics = false
-                    }
-                } label: {
-                    Image(systemName: "list.bullet")
-                        .font(.title3)
-                        .foregroundStyle(surface == .queue ? accentColor : secondaryContentColor)
-                        .overlay(alignment: .topTrailing) {
-                            if let badge = playerState.queueModeBadge {
-                                Image(systemName: badge)
-                                    .font(.system(size: 10, weight: .bold))
-                                    .foregroundStyle(Color.cassetteAccent)
-                                    .padding(2)
-                                    .background(.background, in: Circle())
-                                    .overlay(Circle().stroke(.background.opacity(0.5), lineWidth: 0.5))
-                                    .offset(x: 6, y: -6)
-                                    .transition(.scale.combined(with: .opacity))
-                            }
-                        }
-                        .animation(.smooth(duration: 0.2), value: playerState.queueModeBadge)
-                        .frame(width: 44, height: 44)
+            Button {
+                // Phase 1: instant surface toggle (no morph animation).
+                if surface == .queue {
+                    surface = .player
+                } else {
+                    surface = .queue
+                    showLyrics = false
                 }
-                .buttonStyle(.borderless)
-                .accessibilityLabel("Queue")
+            } label: {
+                Image(systemName: "list.bullet")
+                    .font(.title3)
+                    .foregroundStyle(surface == .queue ? accentColor : secondaryContentColor)
+                    .overlay(alignment: .topTrailing) {
+                        if let badge = playerState.queueModeBadge {
+                            Image(systemName: badge)
+                                .font(.system(size: 10, weight: .bold))
+                                .foregroundStyle(Color.cassetteAccent)
+                                .padding(2)
+                                .background(.background, in: Circle())
+                                .overlay(Circle().stroke(.background.opacity(0.5), lineWidth: 0.5))
+                                .offset(x: 6, y: -6)
+                                .transition(.scale.combined(with: .opacity))
+                        }
+                    }
+                    .animation(.smooth(duration: 0.2), value: playerState.queueModeBadge)
+                    .frame(width: 44, height: 44)
             }
+            .buttonStyle(.borderless)
+            .accessibilityLabel("Queue")
         }
     }
 }
 
-#if canImport(UIKit)
-private struct AirPlayRouteButton: UIViewRepresentable {
-    var tintColor: Color = Color.white.opacity(0.7)
-
-    func makeUIView(context: Context) -> AVRoutePickerView {
-        let view = AVRoutePickerView()
-        view.activeTintColor = UIColor(Color.cassetteAccent)
-        view.tintColor = UIColor(tintColor)
-        view.backgroundColor = .clear
-        return view
-    }
-    func updateUIView(_ uiView: AVRoutePickerView, context: Context) {
-        uiView.tintColor = UIColor(tintColor)
-    }
-}
-#else
 private struct AirPlayRouteButton: View {
     var tintColor: Color = Color.white.opacity(0.7)
 
@@ -1235,7 +888,6 @@ private struct AirPlayRouteButton: View {
             .frame(width: 44, height: 44)
     }
 }
-#endif
 
 // MARK: - Volume
 
@@ -1244,22 +896,5 @@ private struct VolumeSection: View {
     let secondaryContentColor: Color
 
     var body: some View {
-        #if os(iOS)
-        HStack(spacing: CassetteSpacing.m) {
-            Image(systemName: "speaker.fill")
-                .font(.caption)
-                .foregroundStyle(secondaryContentColor)
-                .frame(width: 20)
-                .accessibilityHidden(true)
-
-            SystemVolumeView(contentColor: contentColor)
-
-            Image(systemName: "speaker.wave.3.fill")
-                .font(.caption)
-                .foregroundStyle(secondaryContentColor)
-                .frame(width: 20)
-                .accessibilityHidden(true)
-        }
-        #endif
     }
 }

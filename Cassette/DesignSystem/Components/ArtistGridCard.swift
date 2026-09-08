@@ -6,13 +6,11 @@
 import SwiftUI
 import SwiftSonic
 
-/// An artist avatar card (circular cover + name + album count) for the artists grid, on iOS and macOS.
+/// An artist avatar card (circular cover + name + album count) for the artists grid.
 /// The circle fills the cell width up to a cap, so it adapts to different column counts.
 struct ArtistGridCard: View {
     let artist: ArtistID3
-    #if os(macOS)
     @State private var isHovered = false
-    #endif
 
     var body: some View {
         VStack(spacing: CassetteSpacing.s) {
@@ -25,10 +23,8 @@ struct ArtistGridCard: View {
             .frame(maxWidth: 150)
             .clipShape(Circle())
             .shadow(color: .black.opacity(0.18), radius: 8, y: 4)
-            #if os(macOS)
             .scaleEffect(isHovered ? 1.05 : 1.0)
             .animation(.easeInOut(duration: 0.15), value: isHovered)
-            #endif
 
             Text(artist.name)
                 .font(.cassetteCellTitle)
@@ -42,8 +38,6 @@ struct ArtistGridCard: View {
             }
         }
         .frame(maxWidth: .infinity)
-        #if os(macOS)
         .onHover { isHovered = $0 }
-        #endif
     }
 }

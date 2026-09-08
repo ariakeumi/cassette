@@ -29,16 +29,4 @@ actor RecommendationService {
         Logger.recommendations.info("[RS] similarArtists: all providers empty artistID=\(artistID, privacy: .public)")
         return []
     }
-
-    func freshReleases(limit: Int = 20, daysWindow: Int = 90) async throws -> [AlbumRecommendation] {
-        for provider in providers {
-            let results = try await provider.freshReleases(limit: limit, daysWindow: daysWindow)
-            if !results.isEmpty {
-                Logger.recommendations.debug("freshReleases: \(results.count) result(s) from \(String(describing: type(of: provider)), privacy: .public)")
-                return results
-            }
-        }
-        Logger.recommendations.debug("freshReleases: all providers returned empty")
-        return []
-    }
 }

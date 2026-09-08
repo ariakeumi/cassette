@@ -28,13 +28,20 @@ final class PlaybackSession {
 
     var lastUpdated: Date
     var repeatModeRaw: String = RepeatMode.off.rawValue
+    var isShuffled: Bool = false
+    /// Pre-shuffle queue order — nil when shuffle is off or the original order was
+    /// invalidated by a queue edit. Lets "shuffle off" after a relaunch restore the
+    /// order the user originally queued.
+    var originalQueueData: Data?
 
     init(
         currentIndex: Int = 0,
         currentPosition: TimeInterval = 0,
         queue: [DisplayableSong] = [],
         currentTrack: DisplayableSong? = nil,
-        repeatMode: RepeatMode = .off
+        repeatMode: RepeatMode = .off,
+        isShuffled: Bool = false,
+        originalQueue: [DisplayableSong]? = nil
     ) {
         self.id = "current"
         self.currentIndex = currentIndex
@@ -48,10 +55,17 @@ final class PlaybackSession {
         self.currentTrackIsDownloaded = currentTrack?.isDownloaded ?? false
         self.lastUpdated = Date()
         self.repeatModeRaw = repeatMode.rawValue
+        self.isShuffled = isShuffled
+        self.originalQueueData = originalQueue.flatMap { try? JSONEncoder().encode($0) }
     }
 
     func decodedQueue() -> [DisplayableSong] {
         (try? JSONDecoder().decode([DisplayableSong].self, from: queueData)) ?? []
+    }
+
+    func decodedOriginalQueue() -> [DisplayableSong]? {
+        guard let originalQueueData else { return nil }
+        return try? JSONDecoder().decode([DisplayableSong].self, from: originalQueueData)
     }
 
     func decodedRepeatMode() -> RepeatMode {
@@ -63,7 +77,9 @@ final class PlaybackSession {
         currentPosition: TimeInterval,
         queue: [DisplayableSong],
         currentTrack: DisplayableSong?,
-        repeatMode: RepeatMode
+        repeatMode: RepeatMode,
+        isShuffled: Bool,
+        originalQueue: [DisplayableSong]?
     ) {
         self.currentIndex = currentIndex
         self.currentPosition = currentPosition
@@ -76,5 +92,7 @@ final class PlaybackSession {
         self.currentTrackIsDownloaded = currentTrack?.isDownloaded ?? false
         self.lastUpdated = Date()
         self.repeatModeRaw = repeatMode.rawValue
+        self.isShuffled = isShuffled
+        self.originalQueueData = originalQueue.flatMap { try? JSONEncoder().encode($0) }
     }
 }

@@ -69,17 +69,13 @@ struct ToastOverlay: ViewModifier {
 
     /// Mirrors MainTabView.hasTrack — true while the mini player bar is on screen.
     private var miniPlayerVisible: Bool {
-        container?.playerState.currentTrack != nil || container?.playerState.isLiveStream == true
+        container?.playerState.currentTrack != nil
     }
 
     /// Bottom inset so the toast floats just above the mini player when it is shown, otherwise just
     /// above the tab bar / home indicator. Tunable if the gap needs nudging on device.
     private var bottomInset: CGFloat {
-        #if os(iOS)
-        miniPlayerVisible ? CassetteSpacing.miniPlayerBottomMargin + CassetteSpacing.s : CassetteSpacing.l
-        #else
         miniPlayerVisible ? CassetteMacOSLayout.playerBarReservedHeight + CassetteSpacing.s : CassetteSpacing.l
-        #endif
     }
 
     func body(content: Content) -> some View {

@@ -19,17 +19,15 @@ struct AlbumGridCell: View {
     var body: some View {
         VStack(alignment: .leading, spacing: CassetteSpacing.s) {
             GeometryReader { geo in
-                CoverArtView(id: album.coverArt ?? album.id, size: Int(geo.size.width * 2))
+                CoverArtView(id: album.coverArt ?? album.id, size: Int(geo.size.width * 3))
                     .frame(width: geo.size.width, height: geo.size.width)
                     .cassetteCoverStyle(cornerRadius: CassetteCornerRadius.standard)
             }
             .aspectRatio(1, contentMode: .fit)
             .cassetteMatchedTransitionSource(id: zoomSourceId, in: zoomNamespace)
-            #if os(macOS)
             .scaleEffect(isHovered ? 1.03 : 1.0)
             .animation(.easeInOut(duration: 0.15), value: isHovered)
             .onHover { isHovered = $0 }
-            #endif
 
             Text(album.name)
                 .font(.cassetteCellTitle)

@@ -5,6 +5,16 @@
 
 import Foundation
 
+/// Response DTO for GET /1/user/{username}/listen-count.
+/// Used by `ListenBrainzClient.validateUsername(_:)` to confirm a user exists via a real JSON API
+/// endpoint. The previous `/1/user/{name}` route was an HTML web route that returned a 308 redirect.
+nonisolated struct LBListenCountResponse: Decodable, Sendable {
+    nonisolated struct Payload: Decodable, Sendable {
+        let count: Int64
+    }
+    let payload: Payload
+}
+
 /// Track metadata extracted from a DisplayableSong for a ListenBrainz submission.
 nonisolated struct LBTrackMetadata: Sendable {
     let trackName: String

@@ -11,7 +11,7 @@ import OSLog
 /// Fetches and caches structured lyrics for the active server.
 ///
 /// All persistence uses a private ModelContext created per operation.
-/// No UIKit or SwiftUI imports — this actor is platform-agnostic.
+/// No UI-framework imports — this actor is platform-agnostic.
 actor LyricsService {
     private let serverService: any ServerServiceProtocol
     private let modelContainer: ModelContainer

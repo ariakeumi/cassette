@@ -52,51 +52,23 @@ struct ExternalProvidersSettingsView: View {
             }
         }
         .navigationTitle("Open Releases In")
-        #if os(iOS)
-        .navigationBarTitleDisplayMode(.inline)
-        #endif
-        #if os(iOS)
-        .toolbar {
-            ToolbarItem(placement: .primaryAction) {
-                Button { showingAdd = true } label: {
-                    Image(systemName: "plus")
-                }
-            }
-        }
-        #endif
-        #if os(macOS)
         .toolbar {
             ToolbarItem(placement: .cancellationAction) {
                 Button("Close") { dismiss() }
             }
         }
-        #endif
         .sheet(isPresented: $showingAdd) {
             if let vm {
-                #if os(macOS)
                 ExternalProviderEditView(mode: .new) { vm.save($0) }
                     .frame(minWidth: 400, minHeight: 300)
-                #else
-                NavigationStack {
-                    ExternalProviderEditView(mode: .new) { vm.save($0) }
-                }
-                #endif
             }
         }
         .sheet(item: $editingProvider) { provider in
             if let vm {
-                #if os(macOS)
                 ExternalProviderEditView(mode: .edit(provider), onSave: { vm.save($0) }) {
                     vm.delete(provider)
                 }
                 .frame(minWidth: 400, minHeight: 300)
-                #else
-                NavigationStack {
-                    ExternalProviderEditView(mode: .edit(provider), onSave: { vm.save($0) }) {
-                        vm.delete(provider)
-                    }
-                }
-                #endif
             }
         }
         .onAppear {

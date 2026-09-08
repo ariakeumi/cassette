@@ -107,7 +107,6 @@ struct PlaylistListView: View {
                 }
             }
             .listStyle(.plain)
-            .miniPlayerBottomMargin()
             .refreshable {
                 await vm.load()
                 await vm.loadBestOf()
@@ -154,7 +153,7 @@ private struct OnlinePlaylistRow: View {
 
     var body: some View {
         HStack(spacing: CassetteSpacing.m) {
-            PlaylistCoverThumbnail(playlistId: playlist.id, serverId: nil, coverArtId: playlist.coverArt ?? playlist.id, title: playlist.name, size: 56)
+            PlaylistCoverThumbnail(coverArtId: playlist.coverArt ?? playlist.id, size: 56)
                 .cassetteMatchedTransitionSource(id: playlist.id, in: namespace)
             VStack(alignment: .leading, spacing: 2) {
                 Text(playlist.name)
@@ -262,7 +261,6 @@ private struct OfflinePlaylistContent: View {
                 }
             }
             .listStyle(.plain)
-            .miniPlayerBottomMargin()
         }
     }
 }
@@ -275,7 +273,7 @@ private struct OfflinePlaylistRow: View {
 
     var body: some View {
         HStack(spacing: CassetteSpacing.m) {
-            PlaylistCoverThumbnail(playlistId: playlist.playlistId, serverId: nil, coverArtId: playlist.coverArtId ?? playlist.playlistId, title: playlist.name, size: 56)
+            PlaylistCoverThumbnail(coverArtId: playlist.coverArtId ?? playlist.playlistId, size: 56)
             VStack(alignment: .leading, spacing: 2) {
                 Text(playlist.name)
                     .font(.cassetteCellTitle)

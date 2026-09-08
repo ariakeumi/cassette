@@ -57,7 +57,7 @@ import OSLog
 //   reference, causing SwiftUI to treat the item as new and re-instantiate the
 //   destination. Fix: SearchHistoryNavTarget (plain value struct).
 // Regression 5 — .navigationDestination(item:) used for a destination that itself
-//   pushes further views. The binding-based modifier is re-evaluated by iOS during
+//   pushes further views. The binding-based modifier is re-evaluated during
 //   nested pushes, destroying and re-instantiating the source destination view even
 //   when the binding item is a stable value type. Fix: always use
 //   .navigationDestination(for: Type.self) backed by NavigationPath for any
@@ -86,8 +86,15 @@ struct SearchView: View {
     @Binding var path: NavigationPath
     @Environment(\.appContainer) private var container
     @State private var viewModel: SearchViewModel?
-    @Namespace private var albumZoomNamespace
     @State private var songToAddToPlaylist: DisplayableSong?
+    /// Keyboard-navigable selection over search result songs: ↑/↓ move, ↩ plays — driven by
+    /// SongListKeyboardNavigator after Return commits the search (focus leaves the field).
+    @State private var selectedSongId: String?
+    @State private var keyboardNavToken: UUID?
+
+    private var resultSongs: [DisplayableSong] {
+        (viewModel?.searchResults?.song ?? []).map { DisplayableSong(from: $0) }
+    }
 
     init(searchQuery: Binding<String>, path: Binding<NavigationPath>) {
         self._searchQuery = searchQuery
@@ -117,13 +124,36 @@ struct SearchView: View {
                     subtitle: "Try a different search term."
                 )
             } else {
-                List {
-                    if let vm = viewModel {
-                        activeSearchContent(vm)
+                ScrollViewReader { proxy in
+                    List(selection: $selectedSongId) {
+                        if let vm = viewModel {
+                            activeSearchContent(vm)
+                        }
+                    }
+                    .listStyle(.plain)
+                    .onAppear {
+                        keyboardNavToken = SongListKeyboardNavigator.shared.activate(
+                            songs: { resultSongs },
+                            selection: $selectedSongId,
+                            scrollTo: { proxy.scrollTo($0) },
+                            play: { index in
+                                Task {
+                                    let songs = resultSongs
+                                    guard index < songs.count else { return }
+                                    try? await container?.playerService.play(tracks: songs, startIndex: index)
+                                }
+                            }
+                        )
+                    }
+                    .onDisappear {
+                        if let token = keyboardNavToken {
+                            SongListKeyboardNavigator.shared.deactivate(token)
+                        }
+                    }
+                    .onChange(of: searchQuery) { _, _ in
+                        selectedSongId = nil // 新查询 → 旧选中作废
                     }
                 }
-                .listStyle(.plain)
-                .miniPlayerBottomMargin()
             }
         }
         .navigationDestination(for: ArtistID3.self) { artist in
@@ -134,11 +164,7 @@ struct SearchView: View {
                     serverId: serverId
                 )
             } content: {
-                #if os(macOS)
                 ArtistDetailMacOS(artistId: artist.id, artistName: artist.name, coverArtId: artist.coverArt)
-                #else
-                ArtistDetailView(artist: artist)
-                #endif
             }
         }
         .navigationDestination(for: AlbumID3.self) { album in
@@ -149,50 +175,19 @@ struct SearchView: View {
                     serverId: serverId
                 )
             } content: {
-                #if os(macOS)
                 AlbumDetailMacOS(albumId: album.id, albumName: album.name, coverArtId: album.coverArt)
-                #else
-                AlbumDetailView(album: album)
-                #endif
             }
         }
         .navigationDestination(for: HomeDestination.self) { destination in
             switch destination {
             case .album(let album):
-                #if os(macOS)
                 AlbumDetailMacOS(albumId: album.id, albumName: album.name, coverArtId: album.coverArt)
-                #else
-                AlbumDetailView(
-                    album: album,
-                    zoomSourceId: album.id,
-                    zoomNamespace: albumZoomNamespace,
-                    coverArtId: album.coverArt
-                )
-                #endif
             case .albumById(let id, let name, _, let coverArtId):
-                #if os(macOS)
                 AlbumDetailMacOS(albumId: id, albumName: name, coverArtId: coverArtId)
-                #else
-                AlbumDetailView(
-                    albumId: id,
-                    albumName: name,
-                    zoomSourceId: id,
-                    zoomNamespace: albumZoomNamespace,
-                    coverArtId: coverArtId
-                )
-                #endif
             case .artist(let artist):
-                #if os(macOS)
                 ArtistDetailMacOS(artistId: artist.id, artistName: artist.name, coverArtId: artist.coverArt)
-                #else
-                ArtistDetailView(artist: artist)
-                #endif
             case .artistById(let id, let name, let coverArtId):
-                #if os(macOS)
                 ArtistDetailMacOS(artistId: id, artistName: name, coverArtId: coverArtId)
-                #else
-                ArtistDetailView(artistId: id, artistName: name, coverArtId: coverArtId)
-                #endif
             case .artistBestOf(let id, let name, let coverArtId):
                 ArtistBestOfView(artistId: id, artistName: name, coverArtId: coverArtId)
             default:
@@ -202,17 +197,9 @@ struct SearchView: View {
         .navigationDestination(for: SearchHistoryNavTarget.self) { entry in
             switch entry.itemType {
             case "artist":
-                #if os(macOS)
                 ArtistDetailMacOS(artistId: entry.itemId, artistName: entry.displayName, coverArtId: entry.coverArtId)
-                #else
-                ArtistDetailView(artistId: entry.itemId, artistName: entry.displayName, coverArtId: entry.coverArtId)
-                #endif
             default:
-                #if os(macOS)
                 AlbumDetailMacOS(albumId: entry.itemId, albumName: entry.displayName, coverArtId: entry.coverArtId)
-                #else
-                AlbumDetailView(albumId: entry.itemId, albumName: entry.displayName, coverArtId: entry.coverArtId)
-                #endif
             }
         }
         .onAppear {
@@ -276,8 +263,6 @@ struct SearchView: View {
                 onAddToPlaylist: { s in songToAddToPlaylist = s }
             )
         } else if let results = vm.searchResults, hasAnyResults(results) {
-            artistResultsSection(visibleArtists(from: results))
-            albumResultsSection(results.album ?? [])
             SearchSongResultsSection(
                 songs: (results.song ?? []).map { DisplayableSong(from: $0) },
                 onAddToPlaylist: { s in songToAddToPlaylist = s }
@@ -285,44 +270,8 @@ struct SearchView: View {
         }
     }
 
-    private func visibleArtists(from results: SearchResult3) -> [ArtistID3] {
-        (results.artist ?? []).filter { ($0.albumCount ?? 0) > 0 }
-    }
-
     private func hasAnyResults(_ results: SearchResult3) -> Bool {
-        !visibleArtists(from: results).isEmpty || !(results.album?.isEmpty ?? true) || !(results.song?.isEmpty ?? true)
-    }
-
-    @ViewBuilder
-    private func artistResultsSection(_ artists: [ArtistID3]) -> some View {
-        if !artists.isEmpty {
-            Section("Artists") {
-                ForEach(artists) { artist in
-                    NavigationLink(value: artist) {
-                        ArtistRow(artist: artist)
-                    }
-                }
-            }
-        }
-    }
-
-    @ViewBuilder
-    private func albumResultsSection(_ albums: [AlbumID3]) -> some View {
-        if !albums.isEmpty {
-            Section("Albums") {
-                ForEach(albums) { album in
-                    NavigationLink(value: album) {
-                        AlbumRow(
-                            albumId: album.id,
-                            name: album.name,
-                            artist: album.artist,
-                            year: album.year,
-                            coverArtId: album.coverArt
-                        )
-                    }
-                }
-            }
-        }
+        !(results.song?.isEmpty ?? true)
     }
 
     // MARK: - Local (downloads) results
@@ -451,6 +400,7 @@ struct SearchView: View {
                             onAddToPlaylist: { s in onAddToPlaylist(s) }
                         )
                         .contentShape(Rectangle())
+                        .tag(song.id)
                         .onTapGesture {
                             Task {
                                 do {
@@ -565,7 +515,7 @@ struct SearchView: View {
                 // Clearing search history is destructive with no undo, so gate it behind a confirmation.
                 // A centered .alert (popin) is used here — intentionally diverging from the playlist
                 // delete's bottom action-sheet. The clear runs ONLY on confirm; Cancel leaves the history
-                // intact. .alert is a centered modal on both iOS and macOS.
+                // intact. .alert is a centered modal.
                 .alert("Clear search history?", isPresented: $showClearConfirm) {
                     Button("Clear", role: .destructive) {
                         Task { await container?.searchHistoryService.clear(serverId: serverId) }

@@ -3,7 +3,6 @@
 // Licensed under the Mozilla Public License 2.0.
 // See LICENSE file in the project root for full license information.
 
-#if os(macOS)
 import SwiftUI
 import SwiftData
 
@@ -66,7 +65,7 @@ struct MacOSSettingsView: View {
                 .tabItem { Label("About", systemImage: "info.circle") }
                 .tag(SettingsTab.about)
         }
-        .frame(minWidth: 480, minHeight: 320)
+        .frame(minWidth: 480, minHeight: 620)
     }
 }
 
@@ -77,6 +76,7 @@ private struct PlaybackSettingsTab: View {
         Form {
             ReplayGainSettingsSection()
             CrossfadeSettingsSection()
+            GlobalHotkeySection()
         }
         .formStyle(.grouped)
         .frame(maxWidth: 480)
@@ -274,4 +274,3 @@ private struct AboutSettingsTab: View {
         .frame(maxWidth: 480)
     }
 }
-#endif

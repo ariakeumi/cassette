@@ -13,12 +13,8 @@ struct AlbumsListView: View {
     @State private var viewModel: AlbumListViewModel?
     /// Shared album ordering, persisted and reused by the artist discography too.
     @AppStorage("cassette.albumSort") private var albumSort: AlbumSort = .recentlyAdded
-    /// List vs grid layout. Defaults preserve each platform's current look (macOS grid, iOS list).
-    #if os(macOS)
+    /// List vs grid layout. Defaults to the grid look.
     @AppStorage("cassette.albumListGrid") private var gridLayout = true
-    #else
-    @AppStorage("cassette.albumListGrid") private var gridLayout = false
-    #endif
 
     /// Albums in the user's chosen order (client-side, so switching sort never re-fetches).
     private func sortedAlbums(_ vm: AlbumListViewModel) -> [AlbumID3] { albumSort.sorted(vm.albums) }
@@ -31,9 +27,6 @@ struct AlbumsListView: View {
                 LoadingStateView()
             }
         }
-        #if os(iOS)
-        .cassetteContentWidth()
-        #endif
         .navigationTitle("Albums")
         .toolbar {
             ToolbarItem(placement: .primaryAction) {
@@ -97,7 +90,7 @@ struct AlbumsListView: View {
         }
     }
 
-    /// List of AlbumRow (with the A–Z jump bar on iOS when sorted by name).
+    /// List of AlbumRow.
     @ViewBuilder
     private func albumsList(_ vm: AlbumListViewModel) -> some View {
         let albums = sortedAlbums(vm)
@@ -115,33 +108,13 @@ struct AlbumsListView: View {
                 .id(album.id)
             }
             .listStyle(.plain)
-            .miniPlayerBottomMargin()
             .refreshable { await vm.load() }
-            #if os(iOS)
-            .safeAreaInset(edge: .trailing, spacing: 0) {
-                // The A–Z jump bar only makes sense when sorted by name.
-                if albumSort == .name && albums.count >= 20 {
-                    AlphabetJumpBar(
-                        availableLetters: albums.availableAlphabetLetters(keyPath: \.name),
-                        onLetterTap: { letter in
-                            if let id = firstAlphabetItemID(forLetter: letter, in: albums, keyPath: \.name) {
-                                withAnimation(.easeInOut(duration: 0.2)) {
-                                    proxy.scrollTo(id, anchor: .top)
-                                }
-                            }
-                        }
-                    )
-                    .padding(.trailing, 4)
-                }
-            }
-            #endif
         }
     }
 
-    /// Grid of AlbumGridCell — responsive column count on macOS, adaptive on iOS.
+    /// Grid of AlbumGridCell — responsive column count.
     @ViewBuilder
     private func albumsGrid(_ vm: AlbumListViewModel) -> some View {
-        #if os(macOS)
         GeometryReader { geo in
             let count = Self.gridColumnCount(for: geo.size.width)
             let columns = Array(repeating: GridItem(.flexible(), spacing: 16), count: count)
@@ -158,24 +131,8 @@ struct AlbumsListView: View {
             }
             .refreshable { await vm.load() }
         }
-        #else
-        ScrollView {
-            LazyVGrid(columns: [GridItem(.adaptive(minimum: 110, maximum: 180), spacing: CassetteSpacing.l)], spacing: CassetteSpacing.l) {
-                ForEach(sortedAlbums(vm)) { album in
-                    NavigationLink(value: HomeDestination.album(album)) {
-                        AlbumGridCell(album: album)
-                    }
-                    .buttonStyle(.plain)
-                }
-            }
-            .padding(CassetteSpacing.l)
-        }
-        .refreshable { await vm.load() }
-        .miniPlayerBottomMargin()
-        #endif
     }
 
-    #if os(macOS)
     private static func gridColumnCount(for width: CGFloat) -> Int {
         switch width {
         case ..<900:  return 3
@@ -184,7 +141,6 @@ struct AlbumsListView: View {
         default:      return 6
         }
     }
-    #endif
 }
 
 // MARK: - Offline Albums

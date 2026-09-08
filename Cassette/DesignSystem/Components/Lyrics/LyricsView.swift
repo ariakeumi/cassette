@@ -1,6 +1,6 @@
 // Cassette — Music client for Subsonic/OpenSubsonic servers
 // Copyright (C) 2026 Mathieu Dubart
-// Licensed under the Mozilla Public License 2.0.
+// Licensed under the GNU General Public License v3.0 or later.
 // See LICENSE file in the project root for full license information.
 
 import SwiftUI
@@ -41,7 +41,7 @@ struct LyricsView: View {
     private func loadedContent(_ structured: StructuredLyrics) -> some View {
         ScrollViewReader { proxy in
             ScrollView {
-                LazyVStack(alignment: .leading, spacing: 32) {
+                LazyVStack(alignment: .leading, spacing: 24) {
                     ForEach(Array(structured.line.enumerated()), id: \.offset) { index, line in
                         LyricsLineView(
                             value: line.value,
@@ -54,27 +54,20 @@ struct LyricsView: View {
                         .id(index)
                     }
                 }
-                .padding(.horizontal, 8)
+                .padding(.horizontal, 32)
                 .padding(.vertical, 200)
             }
-            .scrollIndicators(.hidden)
             .onChange(of: viewModel.currentLineIndex) { _, newIndex in
                 guard viewModel.autoScrollEnabled,
                       !viewModel.isUserScrolling,
                       let newIndex else { return }
-                withAnimation(.easeInOut(duration: 0.3)) {
+                withAnimation(.smooth(duration: 0.4)) {
                     proxy.scrollTo(newIndex, anchor: .center)
                 }
             }
             .onScrollPhaseChange { _, newPhase in
-                switch newPhase {
-                case .interacting:
+                if newPhase == .interacting {
                     viewModel.userStartedScrolling()
-                case .decelerating, .idle:
-                    guard viewModel.isUserScrolling else { return }
-                    viewModel.userStoppedScrolling()
-                default:
-                    break
                 }
             }
             .safeAreaInset(edge: .top, spacing: 0) {

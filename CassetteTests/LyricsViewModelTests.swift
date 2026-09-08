@@ -33,12 +33,13 @@ final class MockPlayerService: PlayerServiceProtocol {
     func removeFromQueue(at index: Int) async {}
     func moveInQueue(fromIndex: Int, toIndex: Int) async {}
     func restoreSession() async {}
+    func originalQueueForSession() -> [DisplayableSong]? { nil }
     func handleNetworkRestored() async {}
-    func playRadio(_ station: InternetRadioStation) async throws {}
     func playSmartShuffle() async throws {}
     func playInstantMix(from seed: InstantMixSeed, startingWith seedTrack: DisplayableSong?) async throws {}
     func setAutoExtendEnabled(_ enabled: Bool) async {}
     func setVolume(_ volume: Float) async {}
+    func adjustVolume(by delta: Float) async {}
     func togglePlayPause() async {}
     func saveCurrentPosition() async {}
     func replayGainSettingsDidChange() async {}

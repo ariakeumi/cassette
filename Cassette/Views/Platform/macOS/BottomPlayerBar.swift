@@ -3,7 +3,6 @@
 // Licensed under the Mozilla Public License 2.0.
 // See LICENSE file in the project root for full license information.
 
-#if os(macOS)
 import SwiftUI
 import AVKit
 import OSLog
@@ -31,23 +30,19 @@ struct BottomPlayerBar: View {
     private var currentTrack: DisplayableSong? { playerState?.currentTrack }
     private var isPlaying: Bool { playerState?.playbackState == .playing }
     private var isLoading: Bool { playerState?.playbackState == .loading }
-    private var isLiveStream: Bool { playerState?.isLiveStream == true }
     private var noTrack: Bool { currentTrack == nil }
-    private var hasContent: Bool { currentTrack != nil || playerState?.currentRadio != nil }
+    private var hasContent: Bool { currentTrack != nil }
     private var displayTitle: String {
-        if let radio = playerState?.currentRadio { return radio.name }
-        return currentTrack?.title ?? "No track playing"
+        currentTrack?.title ?? "No track playing"
     }
     private var displayCoverArtId: String? {
-        if let radio = playerState?.currentRadio { return radio.coverArt ?? radio.id }
-        return currentTrack?.coverArtId ?? currentTrack?.id
+        currentTrack?.coverArtId ?? currentTrack?.id
     }
     private var isCompact: Bool { barWidth < 560 }
     private var isNarrow: Bool { barWidth < 400 }
     private var serverId: UUID? { container?.serverState.activeServer?.id }
 
     private var artistAlbumLine: String {
-        guard !isLiveStream else { return " " }
         let parts = [currentTrack?.artist, currentTrack?.albumName].compactMap { $0 }
         return parts.isEmpty ? " " : parts.joined(separator: " — ")
     }
@@ -90,6 +85,13 @@ struct BottomPlayerBar: View {
                 sliderDismissTask = nil
             }
         }
+        .onReceive(NotificationCenter.default.publisher(for: .cassetteVolumeChanged)) { note in
+            guard let volume = note.userInfo?["volume"] as? Float else { return }
+            localVolume = Double(volume)
+            guard !isCompact else { return } // bar too narrow for the slider
+            withAnimation(.easeInOut(duration: 0.2)) { showVolumeSlider = true }
+            scheduleSliderDismiss(after: .seconds(1.6))
+        }
         .task(id: currentTrack?.id) {
             await refreshFavorite()
             await refreshDownloadState()
@@ -118,14 +120,10 @@ struct BottomPlayerBar: View {
                         .font(.system(size: 12, weight: .semibold))
                         .lineLimit(1)
                         .foregroundStyle(!hasContent ? .secondary : .primary)
-                    if isLiveStream {
-                        liveIndicator
-                    } else {
-                        Text(artistAlbumLine)
-                            .font(.system(size: 11))
-                            .foregroundStyle(.primary.opacity(0.6))
-                            .lineLimit(1)
-                    }
+                    Text(artistAlbumLine)
+                        .font(.system(size: 11))
+                        .foregroundStyle(.primary.opacity(0.6))
+                        .lineLimit(1)
                 }
 
                 Spacer(minLength: 0)
@@ -135,9 +133,7 @@ struct BottomPlayerBar: View {
                 }
             }
 
-            if !isLiveStream {
-                thinScrubber
-            }
+            thinScrubber
         }
     }
 
@@ -193,17 +189,6 @@ struct BottomPlayerBar: View {
             trackHeight: 2
         )
         .disabled(noTrack)
-        .accessibilityHidden(true)
-    }
-
-    private var liveIndicator: some View {
-        HStack(spacing: 4) {
-            Circle().fill(Color.red).frame(width: 5, height: 5)
-            Text("LIVE")
-                .font(.caption2.weight(.bold))
-                .foregroundStyle(.red)
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
         .accessibilityHidden(true)
     }
 
@@ -370,17 +355,19 @@ struct BottomPlayerBar: View {
     // MARK: - Secondary Actions
 
     private var secondaryActions: some View {
-        HStack(spacing: 8) {
+        HStack(spacing: 12) {
             // Swap between icons and volume slider; volume button stays anchored on the right.
-            ZStack {
-                secondaryIconsGroup
-                    .opacity(showVolumeSlider ? 0 : 1)
-                    .allowsHitTesting(!showVolumeSlider)
-                volumeSliderPanel
-                    .opacity(showVolumeSlider ? 1 : 0)
-                    .allowsHitTesting(showVolumeSlider)
+            // The slider panel is REMOVED from the layout while hidden — an opacity-hidden view
+            // still occupies its (much wider) slot in a ZStack, which pushed the volume icon far
+            // away from the AirPlay icon.
+            Group {
+                if showVolumeSlider {
+                    volumeSliderPanel
+                } else {
+                    secondaryIconsGroup
+                }
             }
-            .animation(.easeInOut(duration: 0.2), value: showVolumeSlider)
+            .transition(.opacity)
 
             Button {
                 withAnimation(.easeInOut(duration: 0.2)) {
@@ -430,7 +417,8 @@ struct BottomPlayerBar: View {
             }
 
             AirPlayButton()
-                .frame(width: 20, height: 20)
+                .frame(width: 16, height: 16)
+                .contentShape(Rectangle())
         }
     }
 
@@ -474,10 +462,10 @@ struct BottomPlayerBar: View {
         }
     }
 
-    private func scheduleSliderDismiss() {
+    private func scheduleSliderDismiss(after duration: Duration = .seconds(3)) {
         sliderDismissTask?.cancel()
         sliderDismissTask = Task { @MainActor in
-            try? await Task.sleep(for: .seconds(3))
+            try? await Task.sleep(for: duration)
             guard !Task.isCancelled else { return }
             withAnimation(.easeInOut(duration: 0.2)) {
                 showVolumeSlider = false
@@ -500,4 +488,3 @@ struct AirPlayButton: NSViewRepresentable {
         nsView.setRoutePickerButtonColor(NSColor.secondaryLabelColor, for: .normal)
     }
 }
-#endif

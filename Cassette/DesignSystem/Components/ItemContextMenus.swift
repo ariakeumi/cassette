@@ -192,7 +192,6 @@ struct CollectionContextMenuModifier: ViewModifier {
     let onDelete: (() -> Void)?
 
     @Environment(\.appContainer) private var container
-    @State private var showPinLimitAlert = false
 
     private var isPinned: Bool {
         container?.pinService.isPinned(itemType: itemType, itemId: itemId) == true
@@ -269,20 +268,13 @@ struct CollectionContextMenuModifier: ViewModifier {
                     Button {
                         guard let serverId = container?.serverState.activeServer?.id,
                               let pin = container?.pinService else { return }
-                        do {
-                            try pin.pin(
-                                itemType: itemType, itemId: itemId,
-                                displayName: displayName, displaySubtitle: displaySubtitle,
-                                coverArtId: coverArtId, serverId: serverId
-                            )
-                            HapticFeedback.success.trigger()
-                            container?.toastService.showConfirmation("Pinned to Home")
-                        } catch PinError.limitReached {
-                            HapticFeedback.warning.trigger()
-                            showPinLimitAlert = true
-                        } catch {
-                            Logger.pin.error("ItemContextMenus: pin failed — \(error)")
-                        }
+                        pin.pin(
+                            itemType: itemType, itemId: itemId,
+                            displayName: displayName, displaySubtitle: displaySubtitle,
+                            coverArtId: coverArtId, serverId: serverId
+                        )
+                        HapticFeedback.success.trigger()
+                        container?.toastService.showConfirmation("Pinned to Home")
                     } label: {
                         Label("Pin to Home", systemImage: "pin")
                     }
@@ -327,11 +319,6 @@ struct CollectionContextMenuModifier: ViewModifier {
                     displaySubtitle: displaySubtitle
                 )
             }
-            .alert("Pin Limit Reached", isPresented: $showPinLimitAlert) {
-                Button("OK", role: .cancel) {}
-            } message: {
-                Text(PinError.limitReached.errorDescription ?? "")
-            }
     }
 }
 
@@ -350,7 +337,6 @@ struct LazyCollectionContextMenuModifier: ViewModifier {
     let songLoader: () async throws -> [DisplayableSong]
 
     @Environment(\.appContainer) private var container
-    @State private var showPinLimitAlert = false
 
     private var isPinned: Bool {
         container?.pinService.isPinned(itemType: itemType, itemId: itemId) == true
@@ -432,20 +418,13 @@ struct LazyCollectionContextMenuModifier: ViewModifier {
                     Button {
                         guard let serverId = container?.serverState.activeServer?.id,
                               let pin = container?.pinService else { return }
-                        do {
-                            try pin.pin(
-                                itemType: itemType, itemId: itemId,
-                                displayName: displayName, displaySubtitle: displaySubtitle,
-                                coverArtId: coverArtId, serverId: serverId
-                            )
-                            HapticFeedback.success.trigger()
-                            container?.toastService.showConfirmation("Pinned to Home")
-                        } catch PinError.limitReached {
-                            HapticFeedback.warning.trigger()
-                            showPinLimitAlert = true
-                        } catch {
-                            Logger.pin.error("ItemContextMenus: pin failed — \(error)")
-                        }
+                        pin.pin(
+                            itemType: itemType, itemId: itemId,
+                            displayName: displayName, displaySubtitle: displaySubtitle,
+                            coverArtId: coverArtId, serverId: serverId
+                        )
+                        HapticFeedback.success.trigger()
+                        container?.toastService.showConfirmation("Pinned to Home")
                     } label: {
                         Label("Pin to Home", systemImage: "pin")
                     }
@@ -477,11 +456,6 @@ struct LazyCollectionContextMenuModifier: ViewModifier {
                     displayName: displayName,
                     displaySubtitle: displaySubtitle
                 )
-            }
-            .alert("Pin Limit Reached", isPresented: $showPinLimitAlert) {
-                Button("OK", role: .cancel) {}
-            } message: {
-                Text(PinError.limitReached.errorDescription ?? "")
             }
     }
 }

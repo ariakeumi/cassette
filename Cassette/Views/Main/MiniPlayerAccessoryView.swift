@@ -23,7 +23,7 @@ struct MiniPlayerAccessoryView: View {
 
     var body: some View {
         if let playerState = container?.playerState {
-            if #available(macOS 26.0, iOS 26.0, *) {
+            if #available(macOS 26.0, *) {
                 MiniPlayerPlacementReader { isInline in
                     playerContent(playerState, isInline: isInline)
                 }
@@ -37,32 +37,31 @@ struct MiniPlayerAccessoryView: View {
 
     @ViewBuilder
     private func playerContent(_ playerState: PlayerState, isInline: Bool) -> some View {
-        let isLiveStream = playerState.isLiveStream
-        let coverArtId = isLiveStream ? (playerState.currentRadio?.coverArt ?? "") : (playerState.currentTrack?.coverArtId ?? playerState.currentTrack?.id ?? "")
-        let title = isLiveStream ? (playerState.currentRadio?.name ?? "") : (playerState.currentTrack?.title ?? "")
-        let artist: String? = isLiveStream ? "Live Radio" : playerState.currentTrack?.artist
-        let audioFormat: String? = isLiveStream ? nil : playerState.currentTrack?.audioFormat
+        let coverArtId = playerState.currentTrack?.coverArtId ?? playerState.currentTrack?.id ?? ""
+        let title = playerState.currentTrack?.title ?? ""
+        let artist = playerState.currentTrack?.artist
+        let audioFormat = playerState.currentTrack?.audioFormat
         let isPlaying = playerState.playbackState == .playing
         let isAvailable = playerState.isPlaybackAvailable
 
         Group {
             if isInline {
-                inlineBar(coverArtId: coverArtId, title: title, artist: artist, audioFormat: audioFormat, isPlaying: isPlaying, isAvailable: isAvailable, isLiveStream: isLiveStream)
+                inlineBar(coverArtId: coverArtId, title: title, artist: artist, audioFormat: audioFormat, isPlaying: isPlaying, isAvailable: isAvailable)
                     .transition(.opacity)
             } else {
-                expandedBar(playerState: playerState, coverArtId: coverArtId, title: title, artist: artist, audioFormat: audioFormat, isPlaying: isPlaying, isAvailable: isAvailable, isLiveStream: isLiveStream)
+                expandedBar(playerState: playerState, coverArtId: coverArtId, title: title, artist: artist, audioFormat: audioFormat, isPlaying: isPlaying, isAvailable: isAvailable)
                     .transition(.opacity)
             }
         }
         .animation(.easeInOut(duration: 0.2), value: isInline)
         .offset(x: dragOffset)
-        .opacity(1.0 - min(abs(dragOffset) / 200, 0.4))
+        .opacity(1.0 - min(abs(Double(dragOffset)) / 200, 0.4))
         .contentShape(Rectangle())
         .onTapGesture { showingFullPlayer = true }
-        .gesture(isAvailable && !isLiveStream ? swipeSkipGesture : nil)
+        .gesture(isAvailable ? swipeSkipGesture : nil)
     }
 
-    private func inlineBar(coverArtId: String, title: String, artist: String?, audioFormat: String?, isPlaying: Bool, isAvailable: Bool, isLiveStream: Bool) -> some View {
+    private func inlineBar(coverArtId: String, title: String, artist: String?, audioFormat: String?, isPlaying: Bool, isAvailable: Bool) -> some View {
         HStack(spacing: CassetteSpacing.m) {
             CoverArtCard(id: coverArtId, size: 36)
                 .opacity(isAvailable ? 1.0 : 0.5)
@@ -95,7 +94,7 @@ struct MiniPlayerAccessoryView: View {
         .padding(.vertical, CassetteSpacing.s)
     }
 
-    private func expandedBar(playerState: PlayerState, coverArtId: String, title: String, artist: String?, audioFormat: String?, isPlaying: Bool, isAvailable: Bool, isLiveStream: Bool) -> some View {
+    private func expandedBar(playerState: PlayerState, coverArtId: String, title: String, artist: String?, audioFormat: String?, isPlaying: Bool, isAvailable: Bool) -> some View {
         // While the full player covers the mini bar, skip reading position — that read is what drives the
         // capsule's per-tick (500ms) re-render, and the capsule is off-screen so its value can't be seen.
         // The `||` short-circuits before touching playerState.position when showingFullPlayer is true.
@@ -133,7 +132,7 @@ struct MiniPlayerAccessoryView: View {
 
                 HStack(spacing: CassetteSpacing.s) {
                     playPauseButton(isPlaying: isPlaying, isAvailable: isAvailable)
-                    if isAvailable && !isLiveStream {
+                    if isAvailable {
                         Button {
                             HapticFeedback.light.trigger()
                             Task { try? await container?.playerService.skipToNext() }
@@ -151,28 +150,14 @@ struct MiniPlayerAccessoryView: View {
             .padding(.horizontal, CassetteSpacing.l)
             .padding(.vertical, CassetteSpacing.m)
 
-            if isLiveStream {
-                HStack(spacing: CassetteSpacing.xs) {
-                    Circle().fill(Color.red).frame(width: 6, height: 6)
-                    Text("LIVE")
-                        .font(.caption2)
-                        .fontWeight(.bold)
-                        .foregroundStyle(.red)
-                }
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(.horizontal, CassetteSpacing.l)
-                .frame(height: 3)
-                .accessibilityHidden(true)
-            } else {
-                GeometryReader { geo in
-                    Capsule()
-                        .fill(isAvailable ? Color.cassetteAccent : Color.secondary.opacity(0.3))
-                        .frame(width: geo.size.width * CGFloat(progress), height: 3)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                }
-                .frame(height: 3)
-                .accessibilityHidden(true)
+            GeometryReader { geo in
+                Capsule()
+                    .fill(isAvailable ? Color.cassetteAccent : Color.secondary.opacity(0.3))
+                    .frame(width: geo.size.width * CGFloat(progress), height: 3)
+                    .frame(maxWidth: .infinity, alignment: .leading)
             }
+            .frame(height: 3)
+            .accessibilityHidden(true)
         }
     }
 
@@ -264,7 +249,7 @@ struct MiniPlayerAccessoryView: View {
 // Reads tabViewBottomAccessoryPlacement from the environment and passes isInline
 // down as a Bool so MiniPlayerAccessoryView doesn't need to declare the
 // unavailable type at struct level.
-@available(macOS 26.0, iOS 26.0, *)
+@available(macOS 26.0, *)
 private struct MiniPlayerPlacementReader<Content: View>: View {
     @Environment(\.tabViewBottomAccessoryPlacement) private var placement: TabViewBottomAccessoryPlacement?
     @ViewBuilder let content: (Bool) -> Content

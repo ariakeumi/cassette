@@ -13,7 +13,7 @@ import SwiftSonic
 nonisolated enum ConnectionTestError: Error, Sendable, Equatable {
     /// The URL string is malformed, missing scheme, or missing host.
     case invalidURL
-    /// DNS resolution failed — or iOS Local Network Privacy blocked the lookup.
+    /// DNS resolution failed — or Local Network Privacy blocked the lookup.
     case dnsFailure
     /// TCP connection was refused or the network is unreachable.
     case cannotConnect
@@ -21,7 +21,7 @@ nonisolated enum ConnectionTestError: Error, Sendable, Equatable {
     case timeout
     /// TLS certificate validation failed.
     case certificate
-    /// iOS App Transport Security blocked the connection (HTTP on non-ATS-exempt host).
+    /// App Transport Security blocked the connection (HTTP on non-ATS-exempt host).
     case atsBlocked
     /// The server rejected credentials (HTTP 401/403 or Subsonic auth error codes).
     case unauthorized
@@ -53,7 +53,7 @@ extension ConnectionTestError {
         case .dnsFailure:
             return ConnectionErrorPresentation(
                 title: "Server Not Found",
-                description: "The hostname could not be resolved. Check the URL, DNS settings, and local network access in iOS Settings \u{203A} Privacy \u{203A} Local Network.",
+                description: "The hostname could not be resolved. Check the URL and DNS settings, and allow local network access in System Settings.",
                 technicalCode: "dns-failure"
             )
         case .cannotConnect:
@@ -77,7 +77,7 @@ extension ConnectionTestError {
         case .atsBlocked:
             return ConnectionErrorPresentation(
                 title: "Connection Blocked",
-                description: "iOS blocked the connection — use HTTPS or add an ATS exception in the app configuration.",
+                description: "The connection was blocked — use HTTPS or add an ATS exception in the app configuration.",
                 technicalCode: "ats-blocked"
             )
         case .unauthorized:

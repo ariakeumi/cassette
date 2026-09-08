@@ -5,9 +5,6 @@
 
 import SwiftUI
 import SwiftSonic
-#if os(iOS)
-import UniformTypeIdentifiers
-#endif
 
 struct CreatePlaylistSheet: View {
     @Environment(\.dismiss) private var dismiss
@@ -21,14 +18,6 @@ struct CreatePlaylistSheet: View {
 
     var onCreated: ((PlaylistWithSongs) -> Void)? = nil
 
-    #if os(iOS)
-    @State private var pendingImage: UIImage?
-    @State private var showImageOptions = false
-    @State private var showImagePicker = false
-    @State private var showCamera = false
-    @State private var showFilePicker = false
-    @State private var imageToCrop: CroppableImage?
-    #endif
 
     var body: some View {
         NavigationStack {
@@ -70,52 +59,6 @@ struct CreatePlaylistSheet: View {
             }
         }
         .tint(Color.cassetteAccent)
-        #if os(iOS)
-        .confirmationDialog("Add Cover Art", isPresented: $showImageOptions, titleVisibility: .visible) {
-            Button("Choose from Library") {
-                DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { showImagePicker = true }
-            }
-            if UIImagePickerController.isSourceTypeAvailable(.camera) {
-                Button("Take a Photo") {
-                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { showCamera = true }
-                }
-            }
-            Button("Browse Files") {
-                DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { showFilePicker = true }
-            }
-            if pendingImage != nil {
-                Button("Remove Image", role: .destructive) { pendingImage = nil }
-            }
-            Button("Cancel", role: .cancel) {}
-        }
-        .fullScreenCover(isPresented: $showImagePicker) {
-            ImagePickerController(sourceType: .photoLibrary, allowsEditing: false, onPick: { presentCrop($0) }, onCancel: {})
-                .ignoresSafeArea()
-        }
-        .fullScreenCover(isPresented: $showCamera) {
-            ImagePickerController(sourceType: .camera, allowsEditing: false, onPick: { presentCrop($0) }, onCancel: {})
-                .ignoresSafeArea()
-        }
-        .fullScreenCover(item: $imageToCrop) { croppable in
-            SquareCropView(
-                image: croppable.image,
-                onCrop: { pendingImage = $0; imageToCrop = nil },
-                onCancel: { imageToCrop = nil }
-            )
-        }
-        .fileImporter(
-            isPresented: $showFilePicker,
-            allowedContentTypes: [.jpeg, .png, .heic, .webP],
-            allowsMultipleSelection: false
-        ) { result in
-            guard case .success(let urls) = result, let url = urls.first else { return }
-            let accessed = url.startAccessingSecurityScopedResource()
-            defer { if accessed { url.stopAccessingSecurityScopedResource() } }
-            if let data = try? Data(contentsOf: url), let img = UIImage(data: data) {
-                presentCrop(img)
-            }
-        }
-        #endif
         .task {
             guard let c = container else { return }
             if viewModel == nil {
@@ -156,37 +99,17 @@ struct CreatePlaylistSheet: View {
     }
 
     private var hasPhoto: Bool {
-        #if os(iOS)
-        return pendingImage != nil
-        #else
         return false
-        #endif
     }
 
     private var showsPhotoOption: Bool {
-        #if os(iOS)
-        return true
-        #else
         return false
-        #endif
     }
 
     private var photoPreviewImage: PlatformImage? {
-        #if os(iOS)
-        return pendingImage
-        #else
         return nil
-        #endif
     }
 
-    #if os(iOS)
-    /// Defer presenting the crop screen so the picker fully dismisses first (sequential full-screen covers).
-    private func presentCrop(_ image: UIImage) {
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) {
-            imageToCrop = CroppableImage(image: image)
-        }
-    }
-    #endif
 
     /// Create-flow cover carousel (Apple-Music direction). The gradient previews show the neutral base color
     /// (an empty playlist has no first track to derive from yet — that derivation is the edit flow's job);
@@ -211,9 +134,6 @@ struct CreatePlaylistSheet: View {
             onRequestPhotoPicker: {
                 selectedGradient = nil
                 photoIsCover = true
-                #if os(iOS)
-                showImageOptions = true
-                #endif
             },
             onSelectGradient: { shape in
                 selectedGradient = shape
@@ -222,8 +142,8 @@ struct CreatePlaylistSheet: View {
         )
     }
 
-    /// Applies the chosen cover after the playlist is created: render+cache+upload via PlaylistCoverManager
-    /// (cross-platform, supersedes the old iOS-only inline upload) and persist a gradient choice client-side.
+    /// Applies the chosen cover after the playlist is created: render+cache+upload via PlaylistCoverManager,
+    /// and persist a gradient choice client-side.
     private func applyCover(playlistId: String, container c: AppContainer) async {
         let manager = PlaylistCoverManager(
             serverState: c.serverState,
@@ -241,10 +161,5 @@ struct CreatePlaylistSheet: View {
             }
             return
         }
-        #if os(iOS)
-        if photoIsCover, let image = pendingImage, let data = image.jpegData(compressionQuality: 0.85) {
-            await manager.applyImageCover(data, playlistId: playlistId)
-        }
-        #endif
     }
 }

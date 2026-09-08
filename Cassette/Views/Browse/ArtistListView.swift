@@ -98,23 +98,7 @@ struct ArtistListView: View {
                 }
             }
             .listStyle(.plain)
-            .miniPlayerBottomMargin()
             .refreshable { await vm.load() }
-            #if os(iOS)
-            .safeAreaInset(edge: .trailing, spacing: 0) {
-                if vm.indexes.count >= 5 {
-                    AlphabetJumpBar(
-                        availableLetters: Set(vm.indexes.map(\.name)),
-                        onLetterTap: { letter in
-                            withAnimation(.easeInOut(duration: 0.2)) {
-                                proxy.scrollTo(letter, anchor: .top)
-                            }
-                        }
-                    )
-                    .padding(.trailing, 4)
-                }
-            }
-            #endif
         }
     }
 
@@ -126,7 +110,6 @@ struct ArtistListView: View {
             }
         }
         .listStyle(.plain)
-        .miniPlayerBottomMargin()
         .refreshable { await vm.load() }
     }
 
@@ -144,7 +127,6 @@ struct ArtistListView: View {
             .padding(CassetteSpacing.l)
         }
         .refreshable { await vm.load() }
-        .miniPlayerBottomMargin()
     }
 }
 

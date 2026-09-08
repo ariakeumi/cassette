@@ -4,9 +4,6 @@
 // See LICENSE file in the project root for full license information.
 
 import Foundation
-#if os(iOS)
-import UIKit
-#endif
 
 /// Centralized haptic feedback catalog.
 ///
@@ -31,23 +28,5 @@ enum HapticFeedback {
     case error
 
     func trigger() {
-        #if os(iOS)
-        switch self {
-        case .light:
-            UIImpactFeedbackGenerator(style: .light).impactOccurred()
-        case .medium:
-            UIImpactFeedbackGenerator(style: .medium).impactOccurred()
-        case .heavy:
-            UIImpactFeedbackGenerator(style: .heavy).impactOccurred()
-        case .selection:
-            UISelectionFeedbackGenerator().selectionChanged()
-        case .success:
-            UINotificationFeedbackGenerator().notificationOccurred(.success)
-        case .warning:
-            UINotificationFeedbackGenerator().notificationOccurred(.warning)
-        case .error:
-            UINotificationFeedbackGenerator().notificationOccurred(.error)
-        }
-        #endif
     }
 }

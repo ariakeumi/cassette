@@ -11,13 +11,10 @@ import UniformTypeIdentifiers
 struct QueueView: View {
     @Environment(\.appContainer) private var container
     @Environment(\.cassettePlayingAccent) private var playingAccent
-    #if os(macOS)
     @State private var draggedQueueIndex: Int?
     @State private var dropTargetGap: Int?
-    #endif
 
     var body: some View {
-        #if os(macOS)
         VStack(spacing: 0) {
             HStack {
                 Text("Queue")
@@ -43,11 +40,6 @@ struct QueueView: View {
 
             queueContent
         }
-        #else
-        // iOS no longer presents QueueView as a sheet — the queue is inline in FullPlayerView via
-        // InlineQueueList. QueueView() is only instantiated on macOS now; this branch exists to compile.
-        queueContent
-        #endif
     }
 
     @ViewBuilder
@@ -70,13 +62,6 @@ struct QueueView: View {
         let upNext = Array(queue.dropFirst(currentIndex + 1))
 
         List {
-            #if !os(macOS)
-            Section {
-                queueControlsHeader(playerState)
-                    .listRowBackground(Color.clear)
-                    .listRowInsets(EdgeInsets())
-            }
-            #endif
 
             if let current = playerState.currentTrack {
                 Section("Now Playing") {
@@ -100,7 +85,6 @@ struct QueueView: View {
                                     }
                                 }
                             }
-                            #if os(macOS)
                             // macOS reorders by drag-and-drop; show a between-rows insertion line at the
                             // drop gap (top of the target row, or bottom of the last row for an end drop)
                             // instead of a row highlight.
@@ -124,19 +108,7 @@ struct QueueView: View {
                                     Task { await container?.playerService.moveInQueue(fromIndex: from, toIndex: toOffset) }
                                 }
                             ))
-                            #endif
                     }
-                    #if !os(macOS)
-                    .onMove { source, destination in
-                        // iOS uses native List reorder — offset-based, so duplicate-safe by construction.
-                        // `destination` is the Array.move toOffset that moveInQueue already replicates.
-                        guard let relativeSource = source.first else { return }
-                        let absoluteSource = currentIndex + 1 + relativeSource
-                        let absoluteDestination = currentIndex + 1 + destination
-                        HapticFeedback.light.trigger()
-                        Task { await container?.playerService.moveInQueue(fromIndex: absoluteSource, toIndex: absoluteDestination) }
-                    }
-                    #endif
                     .onDelete { indices in
                         let absoluteIndices = indices.sorted(by: >).map { currentIndex + 1 + $0 }
                         HapticFeedback.light.trigger()
@@ -150,15 +122,8 @@ struct QueueView: View {
             }
         }
         .listStyle(.plain)
-        #if !os(macOS)
-        // iOS List reorder only engages in edit mode (per the PlaylistDetailView precedent). Keep it
-        // always-on so Up Next is reorderable via the system grips without an explicit Edit toggle;
-        // this is why iOS shows edit-mode chrome and tap-to-play yields to the reorder/delete affordances.
-        .environment(\.editMode, .constant(.active))
-        #endif
     }
 
-    #if os(macOS)
     /// Thin accent line drawn between rows at the current drop gap (macOS drag-reorder feedback).
     private var queueInsertionLine: some View {
         Rectangle()
@@ -166,7 +131,6 @@ struct QueueView: View {
             .frame(height: 2)
             .padding(.horizontal, CassetteSpacing.l)
     }
-    #endif
 
     @ViewBuilder
     private func queueControlsHeader(_ playerState: PlayerState) -> some View {
@@ -217,8 +181,8 @@ private struct QueueRow: View {
     let song: DisplayableSong
     let isCurrent: Bool
     let onRemove: (() -> Void)?
-    // Default to the system label colors (macOS popover, which has its own background); the inline iOS
-    // queue passes the full player's luminance-adaptive content colors so text reads over the cover blur.
+    // Default to the system label colors; the inline queue passes the full player's luminance-adaptive
+    // content colors so text reads over the cover blur.
     var contentColor: Color = .primary
     var secondaryContentColor: Color = .secondary
     var loadArtwork: Bool = true
@@ -269,11 +233,8 @@ private struct QueueRow: View {
             if isCurrent {
                 NowPlayingBarsIndicator(isPlaying: isPlaying)
             } else {
-                #if os(macOS)
-                // macOS has no edit-mode grip, so keep the visual reorder hint here; on iOS the system
-                // renders its own reorder grip in edit mode, so a second one would be redundant.
+                // Keep the visual reorder hint here — there is no system edit-mode grip to rely on.
                 ReorderIndicator()
-                #endif
             }
         }
         .padding(.vertical, CassetteSpacing.xs)
@@ -344,7 +305,7 @@ private struct QueueRow: View {
     }
 }
 
-/// The iOS Up Next reorder list, re-housed from the (removed) QueueView sheet into FullPlayerView's
+/// The Up Next reorder list, re-housed from the (removed) QueueView sheet into FullPlayerView's
 /// inline queue surface. Native `List` + `.onMove` (always-on edit mode) — offset-based, so
 /// duplicate-safe — rendered transparently over the player's blurred background. Removal is via the row
 /// context menu (no edit-mode delete circles); tap-to-play stays in the queue surface.
@@ -401,9 +362,6 @@ struct InlineQueueList: View {
             }
             .listStyle(.plain)
             .scrollContentBackground(.hidden)
-            #if !os(macOS)
-            .environment(\.editMode, .constant(.active))
-            #endif
         }
     }
 

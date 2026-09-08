@@ -61,11 +61,7 @@ struct ArtistDetailView: View {
     private var headerTextColor: Color { theme.contentColor }
     private var headerSecondaryColor: Color { theme.secondaryContentColor }
     private var systemBackgroundColor: Color {
-        #if canImport(UIKit)
-        Color(UIColor.systemBackground)
-        #else
         Color(NSColor.windowBackgroundColor)
-        #endif
     }
     /// The artist photo (server artist cover) drives the hero; falls back to the latest release's cover, then
     /// the artist id (placeholder glyph).
@@ -147,7 +143,6 @@ struct ArtistDetailView: View {
                         }
                         .ignoresSafeArea(.container, edges: .top)
                         .cassetteHideTopScrollEdgeEffect()
-                        .miniPlayerBottomMargin()
                         .background(bodyColor.ignoresSafeArea())
                         .refreshable {
                             await vm.load()
@@ -169,10 +164,6 @@ struct ArtistDetailView: View {
         }
         .navigationTitle("")
         .navigationBarTitleDisplayModeInline()
-        #if os(iOS)
-        .toolbarBackground(.hidden, for: .navigationBar)
-        .toolbarColorScheme(theme.isThemed ? (theme.isLight ? .light : .dark) : nil, for: .navigationBar)
-        #endif
         // Keyed on connectivity so going offline (or coming back) re-resolves the artist against the
         // right source, as the album and playlist screens already do.
         .task(id: container?.serverState.isOnline) {
@@ -750,8 +741,7 @@ struct ArtistDetailView: View {
 // MARK: - Artist biography
 
 /// The server biography, clamped to a few lines with a "Show more" toggle. Its own
-/// view so the expand state never re-renders the whole artist screen. Shared by the
-/// iOS and macOS artist screens.
+/// view so the expand state never re-renders the whole artist screen.
 struct ArtistBioView: View {
     let bio: String
     let lastFmURL: URL?
@@ -854,9 +844,6 @@ struct OutOfLibraryArtistSheet: View {
                 .padding(CassetteSpacing.l)
             }
             .navigationTitle(artist.name)
-            #if os(iOS)
-            .navigationBarTitleDisplayMode(.inline)
-            #endif
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("Done") { dismiss() }

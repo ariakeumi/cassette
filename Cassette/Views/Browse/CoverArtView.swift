@@ -28,7 +28,7 @@ import SwiftUI
 /// - Parameters:
 ///   - size: Requested pixel size, used for the AsyncImage fallback URL only.
 ///           Tier is auto-detected: `size >= 480` → `.hero` (1200 px decode);
-///           `size < 480` → `.thumb` (240 px decode).
+///           `size < 480` → `.thumb` (480 px decode).
 ///   - tier: Optional explicit tier override. Pass `.hero` for detail-view hero images
 ///           whose pixel size is below 480 (e.g. macOS DetailHeroView at 280 px).
 struct CoverArtView: View {
@@ -96,6 +96,10 @@ private struct CoverArtViewContent: View {
         _displayedId = State(initialValue: initialImage == nil ? nil : id)
     }
 
+    /// Tier is auto-detected from `size` (pt): `>= 480` → `.hero` (1200 px decode);
+    /// `< 480` → `.thumb` (480 px decode). An explicit `tier` wins — pass `.hero` for
+    /// detail-view hero images whose pixel size is below 480 (e.g. the macOS full-player
+    /// artwork at ~300 pt still needs the 1200 px decode on Retina).
     private var resolvedTier: ArtworkTier {
         tier ?? ((size ?? 0) >= 480 ? .hero : .thumb)
     }

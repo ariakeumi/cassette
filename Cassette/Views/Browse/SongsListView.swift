@@ -16,6 +16,14 @@ struct SongsListView: View {
     /// Persisted sort — Title by default, plus Artist / Recently Added / Release Date.
     @AppStorage("cassette.songSort") private var songSort: SongSort = .title
 
+    /// Keyboard-navigable selection: ↑/↓ move, ↩ plays the selection — works immediately on page
+    /// switch via SongListKeyboardNavigator, no click required.
+    @State private var selectedSongId: String?
+    @State private var keyboardNavToken: UUID?
+
+    // TEMP-DIAG 诊断2/4：selection 变化与 focus 状态日志
+    private static let diagLog = Logger(subsystem: "app.cassette", category: "Diag")
+
     var body: some View {
         Group {
             if let vm = viewModel {
@@ -24,9 +32,6 @@ struct SongsListView: View {
                 LoadingStateView()
             }
         }
-        #if os(iOS)
-        .cassetteContentWidth()
-        #endif
         .navigationTitle("Songs")
         .toolbar {
             ToolbarItem(placement: .primaryAction) {
@@ -88,7 +93,7 @@ struct SongsListView: View {
     private func songList(_ vm: SongsListViewModel) -> some View {
         let songs = vm.displaySongs
         return ScrollViewReader { proxy in
-            List {
+            List(selection: $selectedSongId) {
                 if vm.didTruncate {
                     Text("Showing the first \(songs.count.formatted()) songs.")
                         .font(.cassetteCaption)
@@ -96,16 +101,33 @@ struct SongsListView: View {
                         .listRowSeparator(.hidden)
                         .listRowBackground(Color.clear)
                 }
-                playShuffleHeader(songs)
                 ForEach(Array(songs.enumerated()), id: \.element.id) { index, song in
                     SongRow(song: song, index: index + 1, showCoverArt: true, isFavorite: isFavorite(song))
                         .contentShape(Rectangle())
                         .onTapGesture { play(songs, at: index) }
+                        .tag(song.id)
                         .id(song.id)
                 }
             }
             .listStyle(.plain)
-            .miniPlayerBottomMargin()
+            .onAppear {
+                keyboardNavToken = SongListKeyboardNavigator.shared.activate(
+                    songs: { vm.displaySongs },
+                    selection: $selectedSongId,
+                    scrollTo: { proxy.scrollTo($0) },
+                    play: { index in play(vm.displaySongs, at: index) }
+                )
+                Self.diagLog.notice("DIAG SongsList onAppear — token=\(keyboardNavToken?.uuidString.prefix(8) ?? "nil", privacy: .public) selected=\(selectedSongId ?? "nil", privacy: .public)")
+            }
+            .onDisappear {
+                if let token = keyboardNavToken {
+                    SongListKeyboardNavigator.shared.deactivate(token)
+                }
+                Self.diagLog.notice("DIAG SongsList onDisappear")
+            }
+            .onChange(of: selectedSongId) { _, newId in
+                Self.diagLog.notice("DIAG selectedSongId changed → \(newId ?? "nil", privacy: .public)")
+            }
             .refreshable { await vm.load(sort: songSort) }
             .safeAreaInset(edge: .trailing, spacing: 0) {
                 // The A–Z jump bar only makes sense when sorted by title.
@@ -126,38 +148,15 @@ struct SongsListView: View {
         }
     }
 
-    @ViewBuilder
-    private func playShuffleHeader(_ songs: [DisplayableSong]) -> some View {
-        HStack(spacing: 12) {
-            Button {
-                Task { try? await container?.playerService.play(tracks: songs, startIndex: 0) }
-            } label: {
-                Label("Play", systemImage: "play.fill").frame(maxWidth: .infinity)
-            }
-            .buttonStyle(.borderedProminent)
-            .tint(Color.cassetteAccent)
-
-            Button {
-                Task {
-                    let idx = Int.random(in: 0..<songs.count)
-                    try? await container?.playerService.play(tracks: songs, startIndex: idx)
-                    if container?.playerState.isShuffled != true {
-                        await container?.playerService.toggleShuffle()
-                    }
-                }
-            } label: {
-                Label("Shuffle", systemImage: "shuffle").frame(maxWidth: .infinity)
-            }
-            .buttonStyle(.bordered)
-            .tint(Color.cassetteAccent)
-        }
-        .listRowSeparator(.hidden)
-        .listRowBackground(Color.clear)
-        .padding(.vertical, 4)
-    }
-
     private func isFavorite(_ song: DisplayableSong) -> Bool {
         container?.favoritesService.isFavorite(itemType: .song, itemId: song.id) == true
+    }
+
+    /// Plays the keyboard-selected row (↩).
+    private func playSelected(from songs: [DisplayableSong]) {
+        guard let id = selectedSongId,
+              let index = songs.firstIndex(where: { $0.id == id }) else { return }
+        play(songs, at: index)
     }
 
     private func play(_ songs: [DisplayableSong], at index: Int) {

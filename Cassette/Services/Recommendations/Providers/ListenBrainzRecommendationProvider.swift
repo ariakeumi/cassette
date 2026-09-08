@@ -9,78 +9,17 @@ import OSLog
 
 actor ListenBrainzRecommendationProvider: RecommendationProvider {
     private let client: ListenBrainzClient
-    private let service: ListenBrainzService
     private let libraryService: any LibraryServiceProtocol
-    private let cacheTTL: TimeInterval
-
-    private struct CacheKey: Hashable {
-        let username: String
-        let daysWindow: Int
-    }
-
-    private struct CacheEntry {
-        let data: [AlbumRecommendation]
-        let expiresAt: Date
-    }
-
-    private var cache: [CacheKey: CacheEntry] = [:]
-
-    // force-unwrap safe: compile-time string constant
-    nonisolated private static let coverArtArchiveBase = URL(string: "https://coverartarchive.org")!
-
-    nonisolated private static let releaseDateFormatter: DateFormatter = {
-        let f = DateFormatter()
-        f.dateFormat = "yyyy-MM-dd"
-        f.locale = Locale(identifier: "en_US_POSIX")
-        f.timeZone = TimeZone(secondsFromGMT: 0)
-        return f
-    }()
 
     init(
         client: ListenBrainzClient,
-        service: ListenBrainzService,
-        libraryService: any LibraryServiceProtocol,
-        cacheTTL: TimeInterval = 6 * 3600
+        libraryService: any LibraryServiceProtocol
     ) {
         self.client = client
-        self.service = service
         self.libraryService = libraryService
-        self.cacheTTL = cacheTTL
     }
 
     // MARK: - RecommendationProvider
-
-    func freshReleases(limit: Int, daysWindow: Int) async throws -> [AlbumRecommendation] {
-        let snapshot = await service.currentSnapshot()
-        guard snapshot.isEnabled, let username = snapshot.username else { return [] }
-
-        let key = CacheKey(username: username, daysWindow: daysWindow)
-        if let entry = cache[key], Date() < entry.expiresAt {
-            return Array(entry.data.prefix(limit))
-        }
-
-        let dtos: [LBFreshReleaseDTO]
-        do {
-            dtos = try await client.freshReleases(forUser: username, daysWindow: daysWindow)
-        } catch ListenBrainzError.userNotFound {
-            Logger.listenBrainz.warning("freshReleases: LB user not found — returning empty (stale username?)")
-            return []
-        }
-
-        let mapped = dtos.map { map($0) }
-        let sorted = mapped.sorted { a, b in
-            switch (a.releaseDate, b.releaseDate) {
-            case let (lhs?, rhs?): return lhs > rhs
-            case (_?, nil):        return true
-            case (nil, _?):        return false
-            case (nil, nil):       return false
-            }
-        }
-        cache[key] = CacheEntry(data: sorted, expiresAt: Date().addingTimeInterval(cacheTTL))
-        let ttl = Int(cacheTTL)
-        Logger.listenBrainz.debug("freshReleases: cached \(sorted.count, privacy: .public) releases for daysWindow=\(daysWindow, privacy: .public) (TTL \(ttl, privacy: .public)s)")
-        return Array(sorted.prefix(limit))
-    }
 
     func similarArtists(toArtistID artistID: String, limit: Int) async throws -> [SimilarArtistRecommendation] {
         // Resolve Subsonic artist ID → MBID via getArtistInfo2
@@ -133,43 +72,5 @@ actor ListenBrainzRecommendationProvider: RecommendationProvider {
         let inLibraryCount = results.filter { $0.inLibrary }.count
         Logger.listenBrainz.debug("similarArtists: \(results.count, privacy: .public) results (\(inLibraryCount, privacy: .public) in library) for mbid=\(mbid, privacy: .public)")
         return results
-    }
-
-    // MARK: - Mapping
-
-    private func map(_ dto: LBFreshReleaseDTO) -> AlbumRecommendation {
-        let releaseDate: Date?
-        if let dateStr = dto.releaseDate {
-            releaseDate = Self.releaseDateFormatter.date(from: dateStr)
-            if releaseDate == nil {
-                Logger.listenBrainz.warning("freshReleases: unparseable release_date '\(dateStr, privacy: .public)'")
-            }
-        } else {
-            releaseDate = nil
-        }
-
-        let coverArtURL: URL?
-        if let caaId = dto.caaId, let caaReleaseMbid = dto.caaReleaseMbid {
-            coverArtURL = Self.coverArtArchiveBase
-                .appendingPathComponent("release")
-                .appendingPathComponent(caaReleaseMbid)
-                .appendingPathComponent("\(caaId)-250.jpg")
-        } else if let rgMbid = dto.releaseGroupMbid {
-            coverArtURL = Self.coverArtArchiveBase
-                .appendingPathComponent("release-group")
-                .appendingPathComponent(rgMbid)
-                .appendingPathComponent("front-250")
-        } else {
-            coverArtURL = nil
-        }
-
-        return AlbumRecommendation(
-            id: dto.releaseGroupMbid,
-            title: dto.releaseName,
-            artistName: dto.artistCreditName,
-            releaseDate: releaseDate,
-            coverArtURL: coverArtURL,
-            inLibrary: false
-        )
     }
 }

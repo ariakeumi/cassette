@@ -39,10 +39,10 @@ actor NowPlayingService: NowPlayingServiceProtocol {
 
         // Register every command handler SYNCHRONOUSLY, on the MAIN THREAD, in ONE atomic block — before any
         // actor suspension and before the first now-playing info is set. MPRemoteCommandCenter is a main-thread
-        // API: registering it from the NowPlayingService actor (off-main) let iOS snapshot setSupportedCommands
-        // mid-registration — capturing only {Play, Pause} and never re-snapshotting, so Next / Previous /
-        // scrubber showed greyed out (partial/random by run = the registration-vs-snapshot race). One
-        // main-thread block guarantees the supported set is COMPLETE at iOS's single snapshot. addTarget is what
+        // API: registering it from the NowPlayingService actor (off-main) races the system's single
+        // setSupportedCommands snapshot — capturing only {Play, Pause} and never re-snapshotting, so Next /
+        // Previous / scrubber showed greyed out (partial/random by run = the registration-vs-snapshot race).
+        // One main-thread block guarantees the supported set is COMPLETE at that snapshot. addTarget is what
         // makes a command "supported"; isEnabled (in updateRemoteCommandsAvailability) only greys/ungreys it.
         await MainActor.run {
             let center = MPRemoteCommandCenter.shared()
@@ -90,7 +90,6 @@ actor NowPlayingService: NowPlayingServiceProtocol {
                 return .success
             }
 
-            #if os(macOS)
             // macOS Control Center may route the previous-track gesture through skipBackwardCommand
             // instead of previousTrackCommand. Register both so the gesture works on either path.
             center.skipBackwardCommand.preferredIntervals = [NSNumber(value: 0)]
@@ -100,14 +99,13 @@ actor NowPlayingService: NowPlayingServiceProtocol {
                 }
                 return .success
             }
-            #endif
 
             // Favourite the playing track from a remote surface. Registered here with the rest so it
-            // is inside iOS's single supported-commands snapshot (see the note above).
+            // is inside the system's single supported-commands snapshot (see the note above).
             //
-            // NOTE ON WHERE THIS SHOWS UP: iOS's own Now Playing UI — Lock Screen, Dynamic Island,
-            // Control Center — has no slot for a like button and will not render one, whatever we
-            // register. This command reaches the surfaces that DO have one: CarPlay's Now Playing
+            // NOTE ON WHERE THIS SHOWS UP: the system Now Playing UI — Control Center — has no slot
+            // for a like button and will not render one, whatever we register. This command reaches
+            // the surfaces that DO have one: CarPlay's Now Playing
             // and the Apple Watch remote. Registering it costs nothing and is what CarPlay will read
             // when that scene lands.
             center.likeCommand.localizedTitle = String(localized: "Add to Favorites")
@@ -132,65 +130,15 @@ actor NowPlayingService: NowPlayingServiceProtocol {
     func stop() async {
         await MainActor.run {
             MPNowPlayingInfoCenter.default().nowPlayingInfo = nil
-            #if os(macOS)
             MPNowPlayingInfoCenter.default().playbackState = .stopped
-            #endif
         }
-        #if os(macOS)
         postDiscordRPC(.stopped)
-        #endif
     }
 
     // MARK: - Update
 
     func update(with snapshot: NowPlayingSnapshot) async {
-        if snapshot.isLiveStream {
-            // Live stream: fresh dict with the IsLiveStream flag set.
-            // Duration and elapsed time are intentionally omitted — Control Center hides
-            // the scrubber automatically when MPNowPlayingInfoPropertyIsLiveStream is true.
-            var info: [String: Any] = [
-                MPMediaItemPropertyTitle: snapshot.title,
-                MPNowPlayingInfoPropertyIsLiveStream: true,
-                MPNowPlayingInfoPropertyPlaybackRate: snapshot.playbackRate,
-                MPNowPlayingInfoPropertyDefaultPlaybackRate: 1.0
-            ]
-            if let artist = snapshot.artist { info[MPMediaItemPropertyArtist] = artist }
-            let baseInfo = info
-            await MainActor.run {
-                MPNowPlayingInfoCenter.default().nowPlayingInfo = baseInfo
-                #if os(macOS)
-                MPNowPlayingInfoCenter.default().playbackState = .playing
-                #endif
-            }
-            #if os(macOS)
-            postDiscordRPC(.nowPlaying(.init(
-                title: snapshot.title,
-                artist: snapshot.artist ?? "",
-                album: snapshot.album ?? "",
-                duration: snapshot.duration,
-                startedAt: Date().timeIntervalSince1970
-            )))
-            #endif
-
-            // Check ArtworkImageCache — use hero tier for lock screen / Control Center quality.
-            if let coverArtId = snapshot.coverArtId,
-               let cachedImage = await artworkImageCache.cached(for: coverArtId, tier: .hero) {
-                let artwork = MPMediaItemArtwork(boundsSize: CGSize(width: 600, height: 600)) { _ in cachedImage }
-                await MainActor.run {
-                    var infoWithArt = MPNowPlayingInfoCenter.default().nowPlayingInfo ?? baseInfo
-                    infoWithArt[MPMediaItemPropertyArtwork] = artwork
-                    MPNowPlayingInfoCenter.default().nowPlayingInfo = infoWithArt
-                    #if os(macOS)
-                    MPNowPlayingInfoCenter.default().playbackState = .playing
-                    #endif
-                }
-            }
-
-            updateRemoteCommandsAvailability(isLiveStream: true)
-            return
-        }
-
-        updateRemoteCommandsAvailability(isLiveStream: false)
+        updateRemoteCommandsAvailability()
 
         if snapshot.artworkURL == nil {
             // Position-only update (pause/resume/seek): merge into the existing dict so
@@ -205,11 +153,8 @@ actor NowPlayingService: NowPlayingServiceProtocol {
                 if let artist = snapshot.artist { info[MPMediaItemPropertyArtist] = artist }
                 if let album = snapshot.album { info[MPMediaItemPropertyAlbumTitle] = album }
                 MPNowPlayingInfoCenter.default().nowPlayingInfo = info
-                #if os(macOS)
                 MPNowPlayingInfoCenter.default().playbackState = snapshot.playbackRate > 0 ? .playing : .paused
-                #endif
             }
-            #if os(macOS)
             if snapshot.playbackRate == 0 {
                 postDiscordRPC(.stopped)
             } else if let song = currentSong {
@@ -221,7 +166,6 @@ actor NowPlayingService: NowPlayingServiceProtocol {
                     startedAt: Date().timeIntervalSince1970
                 )))
             }
-            #endif
             return
         }
 
@@ -242,11 +186,8 @@ actor NowPlayingService: NowPlayingServiceProtocol {
         let baseInfo = info
         await MainActor.run {
             MPNowPlayingInfoCenter.default().nowPlayingInfo = baseInfo
-            #if os(macOS)
             MPNowPlayingInfoCenter.default().playbackState = snapshot.playbackRate > 0 ? .playing : .paused
-            #endif
         }
-        #if os(macOS)
         postDiscordRPC(.nowPlaying(.init(
             title: snapshot.title,
             artist: snapshot.artist ?? "",
@@ -254,7 +195,6 @@ actor NowPlayingService: NowPlayingServiceProtocol {
             duration: snapshot.duration,
             startedAt: Date().timeIntervalSince1970
         )))
-        #endif
 
         // Fast path: image already in ArtworkImageCache (pre-loaded when the card was visible).
         if let coverArtId = snapshot.coverArtId,
@@ -265,9 +205,7 @@ actor NowPlayingService: NowPlayingServiceProtocol {
                 var infoWithArt = MPNowPlayingInfoCenter.default().nowPlayingInfo ?? fallback
                 infoWithArt[MPMediaItemPropertyArtwork] = artwork
                 MPNowPlayingInfoCenter.default().nowPlayingInfo = infoWithArt
-                #if os(macOS)
                 MPNowPlayingInfoCenter.default().playbackState = snapshot.playbackRate > 0 ? .playing : .paused
-                #endif
             }
             return
         }
@@ -280,9 +218,7 @@ actor NowPlayingService: NowPlayingServiceProtocol {
                 var infoWithArt = MPNowPlayingInfoCenter.default().nowPlayingInfo ?? fallback
                 infoWithArt[MPMediaItemPropertyArtwork] = artwork
                 MPNowPlayingInfoCenter.default().nowPlayingInfo = infoWithArt
-                #if os(macOS)
                 MPNowPlayingInfoCenter.default().playbackState = snapshot.playbackRate > 0 ? .playing : .paused
-                #endif
             }
         }
     }
@@ -297,16 +233,13 @@ actor NowPlayingService: NowPlayingServiceProtocol {
             info[MPNowPlayingInfoPropertyPlaybackRate] = rate
             info[MPMediaItemPropertyPlaybackDuration] = duration
             MPNowPlayingInfoCenter.default().nowPlayingInfo = info
-            #if os(macOS)
             MPNowPlayingInfoCenter.default().playbackState = .playing
-            #endif
         }
     }
 
     // MARK: - Favourite
 
     /// Stars or unstars whatever is playing, driven from a remote surface (CarPlay, Watch).
-    /// Radio is excluded — a live stream has no song to favourite.
     private func toggleFavoriteForCurrentTrack() async {
         guard let favoritesService, let songId = currentSong?.songId else { return }
         let wasFavorite = await MainActor.run { favoritesService.isFavorite(itemType: .song, itemId: songId) }
@@ -324,7 +257,7 @@ actor NowPlayingService: NowPlayingServiceProtocol {
     }
 
     /// Mirrors the stored favourite state onto the command, so a remote surface that draws the
-    /// button filled/unfilled draws it right. Disabled for radio, which cannot be favourited.
+    /// button filled/unfilled draws it right.
     private func refreshLikeCommandState() async {
         let songId = currentSong?.songId
         let isFavorite: Bool
@@ -342,22 +275,19 @@ actor NowPlayingService: NowPlayingServiceProtocol {
 
     // MARK: - Remote command availability
 
-    private func updateRemoteCommandsAvailability(isLiveStream: Bool) {
+    private func updateRemoteCommandsAvailability() {
         let center = MPRemoteCommandCenter.shared()
-        // Skip, previous, and scrubbing are meaningless for a live stream.
-        // play/pause/togglePlayPause remain enabled in both modes (always-on).
-        Logger.nowPlaying.debug("[REMOTE] updateRemoteCommandsAvailability — isLiveStream=\(isLiveStream, privacy: .public) nextEnabled=\(!isLiveStream, privacy: .public)")
+        // play/pause/togglePlayPause remain always-on.
+        Logger.nowPlaying.debug("[REMOTE] updateRemoteCommandsAvailability — nextEnabled=true")
         Logger.nowPlaying.debug("[REMOTE] nextTrackCommand.isEnabled BEFORE=\(center.nextTrackCommand.isEnabled, privacy: .public)")
         Logger.nowPlaying.debug("[REMOTE] previousTrackCommand.isEnabled BEFORE=\(center.previousTrackCommand.isEnabled, privacy: .public)")
-        appendToDebugLog("[RCC] updateRemoteCommandsAvailability called — isLiveStream=\(isLiveStream)")
+        appendToDebugLog("[RCC] updateRemoteCommandsAvailability called")
         appendToDebugLog("[RCC] nextTrack BEFORE=\(center.nextTrackCommand.isEnabled)")
         appendToDebugLog("[RCC] previousTrack BEFORE=\(center.previousTrackCommand.isEnabled)")
-        center.nextTrackCommand.isEnabled = !isLiveStream
-        center.previousTrackCommand.isEnabled = !isLiveStream
-        #if os(macOS)
-        center.skipBackwardCommand.isEnabled = !isLiveStream
-        #endif
-        center.changePlaybackPositionCommand.isEnabled = !isLiveStream
+        center.nextTrackCommand.isEnabled = true
+        center.previousTrackCommand.isEnabled = true
+        center.skipBackwardCommand.isEnabled = true
+        center.changePlaybackPositionCommand.isEnabled = true
         Logger.nowPlaying.debug("[REMOTE] nextTrackCommand.isEnabled AFTER=\(center.nextTrackCommand.isEnabled, privacy: .public)")
         Logger.nowPlaying.debug("[REMOTE] previousTrackCommand.isEnabled AFTER=\(center.previousTrackCommand.isEnabled, privacy: .public)")
         appendToDebugLog("[RCC] nextTrack AFTER=\(center.nextTrackCommand.isEnabled)")
@@ -366,7 +296,6 @@ actor NowPlayingService: NowPlayingServiceProtocol {
 
     // MARK: - Discord RPC
 
-    #if os(macOS)
     private nonisolated func postDiscordRPC(_ event: DiscordRPCEvent) {
         let port = 47832
         let urlString: String
@@ -389,7 +318,6 @@ actor NowPlayingService: NowPlayingServiceProtocol {
 
         URLSession.shared.dataTask(with: request) { _, _, _ in }.resume()
     }
-    #endif
 
     private func appendToDebugLog(_ message: String) {
         // Forward to the off-actor, opt-in, size-capped logger — no synchronous disk I/O on the playback
@@ -413,35 +341,9 @@ private enum RemoteCommandDebugLog {
     private nonisolated static let queue = DispatchQueue(label: "fr.mathieu-dubart.cassette.rcc-debug-log", qos: .utility)
 
     nonisolated static func log(_ message: String) {
-        #if os(iOS)
-        // Cheap in-memory flag check on the caller; when disabled (the default) we do zero work and zero I/O.
-        guard UserDefaults.standard.bool(forKey: enabledKey) else { return }
-        let line = "\(Date()): \(message)\n"
-        queue.async {
-            let fm = FileManager.default
-            guard let docs = fm.urls(for: .documentDirectory, in: .userDomainMask).first,
-                  let data = line.data(using: .utf8) else { return }
-            let file = docs.appendingPathComponent("cassette_debug.log")
-            // Rotate before appending once at/over the cap so the file can't grow without bound.
-            if let attrs = try? fm.attributesOfItem(atPath: file.path),
-               let size = attrs[.size] as? Int, size >= maxBytes {
-                let rotated = docs.appendingPathComponent("cassette_debug.log.1")
-                try? fm.removeItem(at: rotated)
-                try? fm.moveItem(at: file, to: rotated)
-            }
-            if let handle = try? FileHandle(forWritingTo: file) {
-                defer { try? handle.close() }
-                handle.seekToEndOfFile()
-                handle.write(data)
-            } else {
-                try? data.write(to: file)
-            }
-        }
-        #endif
     }
 }
 
-#if os(macOS)
 private nonisolated enum DiscordRPCEvent {
     case nowPlaying(DiscordNowPlayingInfo)
     case stopped
@@ -454,4 +356,3 @@ private nonisolated struct DiscordNowPlayingInfo: Encodable {
     let duration: Double
     let startedAt: Double
 }
-#endif

@@ -68,7 +68,7 @@ struct PlaylistGradientSpec: Codable, Equatable, Sendable {
 
 /// Renders a `PlaylistGradientSpec` as a SwiftUI view — used for the picker preview and (off-screen) for the
 /// JPEG render that becomes the real cover. Switches on the form; each derives its stops from the one base
-/// color via `Color.adjusted`. Cross-platform; the mesh form falls back to a linear gradient pre-iOS 18.
+/// color via `Color.adjusted`. The mesh form falls back to a linear gradient pre-macOS 15.
 struct PlaylistGradientView: View {
     let spec: PlaylistGradientSpec
 
@@ -98,7 +98,7 @@ struct PlaylistGradientView: View {
 
     @ViewBuilder
     private func meshOrFallback(base: Color, light: Color, dark: Color) -> some View {
-        if #available(iOS 18, macOS 15, *) {
+        if #available(macOS 15, *) {
             MeshGradient(
                 width: 3, height: 3,
                 points: [
@@ -118,8 +118,8 @@ struct PlaylistGradientView: View {
     }
 }
 
-/// The ANIMATED crisp hero cover for a gradient playlist — a `MeshGradient` (iOS 18+, always taken on the
-/// iOS-26 min target) whose control points drift slowly for a subtle living motion (Apple-Music feel).
+/// The ANIMATED crisp hero cover for a gradient playlist — a `MeshGradient` whose control points
+/// drift slowly for a subtle living motion (Apple-Music feel).
 /// SEPARATE from `PlaylistGradientView`, which stays static so the off-screen JPEG snapshot is deterministic.
 /// The 6 forms map to 6 nine-color mesh arrangements derived from the spec's base/light/dark shades.
 /// Foreground only (no blur) so the animation is cheap; the background/melt stays static (rasterized once).

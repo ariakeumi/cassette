@@ -3,7 +3,6 @@
 // Licensed under the Mozilla Public License 2.0.
 // See LICENSE file in the project root for full license information.
 
-#if os(macOS)
 import SwiftUI
 import AppKit
 import OSLog
@@ -31,6 +30,7 @@ struct FullPlayerExpandedView: View {
     @State private var isMuted = false
     @State private var volumeBeforeMute: Double = 0.7
     @State private var showVolumeSlider = false
+    @State private var volumeHideTask: Task<Void, Never>?
     @State private var showAddToPlaylist = false
     @State private var draggedQueueIndex: Int?
     @State private var dropTargetGap: Int?
@@ -40,7 +40,6 @@ struct FullPlayerExpandedView: View {
     private var currentTrack: DisplayableSong? { playerState?.currentTrack }
     private var isPlaying: Bool { playerState?.playbackState == .playing }
     private var isLoading: Bool { playerState?.playbackState == .loading }
-    private var isLiveStream: Bool { playerState?.isLiveStream == true }
     private var noTrack: Bool { currentTrack == nil }
     private var queue: [DisplayableSong] { playerState?.queue ?? [] }
     private var currentIndex: Int { playerState?.currentIndex ?? 0 }
@@ -54,8 +53,8 @@ struct FullPlayerExpandedView: View {
     /// The rendered background is ALWAYS dark — `generatePalette` caps brightness and the view forces a dark
     /// colorScheme — so the accent must be measured against THAT dark background, not the raw cover. Measuring
     /// against the raw cover made a light cover resolve to the dark accent variant, which then vanished on the
-    /// dark mesh (the "black/color mix" break). Same `ColorContrastUtils` source as iOS; only the background
-    /// argument is corrected, so the accent stays legible on light and dark covers alike.
+    /// dark mesh (the "black/color mix" break). The `ColorContrastUtils` source is unchanged; only the
+    /// background argument is corrected, so the accent stays legible on light and dark covers alike.
     private var playerAccent: Color {
         CassetteColors.accentForeground(on: generatePalette(from: dominantColor).dark)
     }
@@ -110,6 +109,25 @@ struct FullPlayerExpandedView: View {
         }
         .onReceive(NotificationCenter.default.publisher(for: .cassetteOpenFullPlayerLyrics)) { _ in
             selectedPanel = .lyrics
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .cassetteVolumeChanged)) { note in
+            guard let volume = note.userInfo?["volume"] as? Float else { return }
+            localVolume = Double(volume)
+            isMuted = volume == 0
+            volumeHideTask?.cancel()
+            withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) {
+                showVolumeSlider = true
+            }
+            volumeHideTask = Task {
+                try? await Task.sleep(for: .seconds(1.6))
+                guard !Task.isCancelled else { return }
+                withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) {
+                    showVolumeSlider = false
+                }
+            }
+        }
+        .onDisappear {
+            volumeHideTask?.cancel()
         }
         .onChange(of: selectedPanel) { _, newPanel in
             UserDefaults.standard.set(newPanel == .lyrics, forKey: "cassette.fullPlayerLastPanel")
@@ -329,13 +347,8 @@ struct FullPlayerExpandedView: View {
             trackInfo
                 .padding(.bottom, 20)
 
-            if isLiveStream {
-                liveBadge
-                    .padding(.bottom, 20)
-            } else {
-                scrubber
-                    .padding(.bottom, 24)
-            }
+            scrubber
+                .padding(.bottom, 24)
 
             playbackControls
                 .padding(.bottom, 20)
@@ -486,15 +499,6 @@ struct FullPlayerExpandedView: View {
         .frame(maxWidth: 340)
     }
 
-    private var liveBadge: some View {
-        Text("LIVE")
-            .font(.caption.weight(.semibold))
-            .foregroundStyle(.red)
-            .padding(.horizontal, 12)
-            .padding(.vertical, 6)
-            .background(.red.opacity(0.15), in: Capsule())
-    }
-
     private var playbackControls: some View {
         HStack(spacing: 32) {
             Button {
@@ -628,7 +632,7 @@ struct FullPlayerExpandedView: View {
                         .clipShape(RoundedRectangle(cornerRadius: 6))
                 }
                 .buttonStyle(.plain)
-                .disabled(noTrack || isLiveStream)
+                .disabled(noTrack)
 
                 Button {
                     withAnimation(.smooth(duration: 0.3)) { selectedPanel = .queue }
@@ -790,4 +794,3 @@ private struct ExpandedQueueRow: View {
         .padding(.vertical, 2)
     }
 }
-#endif

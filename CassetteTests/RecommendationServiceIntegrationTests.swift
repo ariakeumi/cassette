@@ -57,7 +57,6 @@ private struct RSIMockProvider: RecommendationProvider {
         self.artistResults = artists
     }
 
-    func freshReleases(limit: Int, daysWindow: Int) async throws -> [AlbumRecommendation] { albumResults }
     func similarArtists(toArtistID: String, limit: Int) async throws -> [SimilarArtistRecommendation] { artistResults }
 }
 
@@ -117,7 +116,7 @@ private func makeLBComponents(serviceTransport: any ListenBrainzTransport, provi
     let serviceClient = ListenBrainzClient(transport: serviceTransport)
     let service = ListenBrainzService(client: serviceClient, keychain: keychain, userDefaults: defaults)
     let providerClient = ListenBrainzClient(transport: providerTransport)
-    let provider = ListenBrainzRecommendationProvider(client: providerClient, service: service, libraryService: RSILibraryNullStub())
+    let provider = ListenBrainzRecommendationProvider(client: providerClient, libraryService: RSILibraryNullStub())
     return (provider, service)
 }
 
@@ -125,38 +124,6 @@ private func makeLBComponents(serviceTransport: any ListenBrainzTransport, provi
 
 @Suite("RecommendationService — integration with LB + Subsonic providers")
 struct RecommendationServiceIntegrationTests {
-
-    @Test("LB enabled: freshReleases returns LB data, Subsonic not consulted")
-    func lbEnabledFreshReleasesFromLB() async throws {
-        let svcTransport = RSITransport()
-        svcTransport.enqueue(data: Data(#"{"payload":{"count":0}}"#.utf8), status: 200)  // enable() validation
-        let provTransport = RSITransport()
-        provTransport.enqueue(data: integrationJSON, status: 200)
-
-        let (lbProvider, service) = makeLBComponents(serviceTransport: svcTransport, providerTransport: provTransport)
-        try await service.enable(username: "testuser")
-
-        let subsonicMock = RSIMockProvider()  // returns no albums — should not be reached
-        let recommendationService = RecommendationService(providers: [lbProvider, subsonicMock])
-
-        let results = try await recommendationService.freshReleases()
-        #expect(results.count == 1)
-        #expect(results[0].title == "LB Album")
-    }
-
-    @Test("LB disabled: freshReleases returns empty (Subsonic also returns empty, as expected)")
-    func lbDisabledFreshReleasesEmpty() async throws {
-        let svcTransport = RSITransport()
-        let provTransport = RSITransport()
-        // Service is never enabled — stays isEnabled = false
-        let (lbProvider, _) = makeLBComponents(serviceTransport: svcTransport, providerTransport: provTransport)
-
-        let subsonicMock = RSIMockProvider()  // Subsonic doesn't implement freshReleases → returns []
-        let recommendationService = RecommendationService(providers: [lbProvider, subsonicMock])
-
-        let results = try await recommendationService.freshReleases()
-        #expect(results.isEmpty)
-    }
 
     @Test("similarArtists: LB stub returns empty, first-non-empty uses Subsonic results")
     func similarArtistsFallsBackToSubsonic() async throws {

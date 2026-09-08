@@ -10,7 +10,6 @@ import OSLog
 @MainActor
 final class PinService: PinServiceProtocol {
     private let modelContext: ModelContext
-    private static let maxPinnedItems = 6
     private var widgetSyncService: WidgetSyncService?
 
     init(modelContainer: ModelContainer) {
@@ -55,7 +54,7 @@ final class PinService: PinServiceProtocol {
         displaySubtitle: String,
         coverArtId: String?,
         serverId: UUID
-    ) throws {
+    ) {
         let compositeId = "\(itemType.rawValue):\(itemId)"
         var existingDescriptor = FetchDescriptor<PinnedItem>(
             predicate: #Predicate<PinnedItem> { $0.id == compositeId }
@@ -64,8 +63,6 @@ final class PinService: PinServiceProtocol {
         if (try? modelContext.fetchCount(existingDescriptor)) ?? 0 > 0 { return }
 
         let count = currentPinnedCount()
-        guard count < PinService.maxPinnedItems else { throw PinError.limitReached }
-
         let item = PinnedItem(
             itemType: itemType,
             itemId: itemId,
@@ -120,6 +117,19 @@ final class PinService: PinServiceProtocol {
         item.coverArtId = newCoverArtId
         try? modelContext.save()
         Logger.pin.debug("Updated coverArtId for \(itemType.rawValue, privacy: .public) \(itemId, privacy: .public) → \(newCoverArtId ?? "<nil>", privacy: .public)")
+    }
+
+    /// 重命名固定项的显示名（本地 SwiftData），并同步触发 UI 刷新。
+    func renamePinnedItem(itemType: PinnedItemType, itemId: String, newName: String) {
+        let compositeId = "\(itemType.rawValue):\(itemId)"
+        var descriptor = FetchDescriptor<PinnedItem>(
+            predicate: #Predicate<PinnedItem> { $0.id == compositeId }
+        )
+        descriptor.fetchLimit = 1
+        guard let item = try? modelContext.fetch(descriptor).first else { return }
+        item.displayName = newName
+        try? modelContext.save()
+        Logger.pin.debug("Renamed pinned \(itemType.rawValue, privacy: .public) \(itemId, privacy: .public) → \(newName, privacy: .public)")
     }
 
     // MARK: - Reorder

@@ -6,14 +6,7 @@
 import Foundation
 import SwiftData
 import OSLog
-#if canImport(UIKit)
-import UIKit
-#elseif canImport(AppKit)
 import AppKit
-#endif
-#if os(iOS)
-import WidgetKit
-#endif
 
 nonisolated enum WidgetSyncError: Error {
     case sharedContainerUnavailable
@@ -109,9 +102,6 @@ actor WidgetSyncService {
             try? await bridgeCoverArt(coverArtId: coverArtId)
             await syncDominantColors(forCoverArtIds: [coverArtId])
         }
-        #if os(iOS)
-        WidgetCenter.shared.reloadTimelines(ofKind: WidgetKind.nowPlaying)
-        #endif
         Logger.widget.debug("onPlayStateChanged: isPlaying=\(isPlaying), reload NowPlayingWidget (bypass throttle)")
     }
 
@@ -223,9 +213,6 @@ actor WidgetSyncService {
         let now = Date()
         if let last = lastReloadDate, now.timeIntervalSince(last) < 2.0 { return }
         lastReloadDate = now
-        #if os(iOS)
-        WidgetCenter.shared.reloadAllTimelines()
-        #endif
         Logger.widget.debug("reloadAllTimelines triggered")
     }
 }

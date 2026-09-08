@@ -19,14 +19,15 @@ import AppKit
 /// Tier determines both the pixel dimension passed to CGImageSourceCreateThumbnailAtIndex
 /// and the disk/RAM cache key suffix (`id@thumb`, `id@hero`).
 nonisolated enum ArtworkTier: String, Sendable {
-    /// 240 px — list rows, grid cells, queue rows, mini player, Wrapped cards.
+    /// 480 px — list rows, grid cells, queue rows, mini player. Sized for Retina 2× of
+    /// grid cards up to 240 pt (Home pinned cards reach 180 pt → 360 px needed).
     case thumb
     /// 1200 px — detail view heroes, full-player cover, lock screen artwork.
     case hero
 
     var decodePixels: Int {
         switch self {
-        case .thumb: return 240
+        case .thumb: return 480
         case .hero: return 1200
         }
     }
@@ -66,17 +67,13 @@ private actor CoverFetchGate {
 /// Shared in-memory cache for cover art PlatformImages, keyed by `"\(coverArtId)@\(tier)"`.
 ///
 /// Two decode tiers keep memory and decode cost proportional to display context:
-///   • thumb (240 px) — list rows, grid cells, Wrapped cards, mini player
+///   • thumb (480 px) — list rows, grid cells, Wrapped cards, mini player
 ///   • hero  (1200 px) — detail view heroes, full-player cover, lock screen artwork
 ///
 /// Both tiers for the same id can coexist in RAM. LRU eviction is unified across tiers;
 /// maxEntries is sized to accommodate ~100 thumb + ~10 hero images.
 ///
 /// Resolution order per tier: RAM → disk (`id@tier`) → server fetch + persist to `id@tier`.
-///
-/// Legacy plain-`id` files (full-res JPEGs written by pre-tier builds) are never read;
-/// decoding them takes ~1100ms/file and starves the audio decode thread. They are cleaned
-/// up on launch by AppContainer.sweepLegacyCoverArtFiles.
 @MainActor
 @Observable
 final class ArtworkImageCache {
@@ -148,12 +145,10 @@ final class ArtworkImageCache {
         }
 
         // 2. Disk hit — tiered file only (`{id}@thumb` / `{id}@hero`).
-        //    Legacy untagged files (`{id}` with no suffix, full-res JPEGs written by
-        //    pre-tier builds) are deliberately not read: decoding a 2000×2000 JPEG at
-        //    240px takes ~1100ms even on a background thread, starving the audio decode
-        //    thread and causing audible crackling. If the tiered file doesn't exist,
-        //    skip directly to the network fetch (step 3). Untagged legacy files are
-        //    cleaned up on launch by AppContainer.sweepLegacyCoverArtFiles.
+        //    Untagged files (`{id}` with no suffix, written at offline-download time) are
+        //    deliberately not read here: they are full-res and are decoded by CoverArtView's
+        //    local fallback at the tier size instead. Reading them raw in the cache path would
+        //    decode a 2000×2000 JPEG at full size, starving the audio decode thread.
         let tieredDiskId = "\(coverArtId)@\(tier.rawValue)"
         if let localURL = await downloadService.localCoverArtURL(forId: tieredDiskId) {
             let image = await Task.detached(priority: .userInitiated) {

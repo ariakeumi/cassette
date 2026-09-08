@@ -8,7 +8,7 @@ import SwiftSonic
 
 /// A seed for an AudioMuse-AI Instant Mix. The case decides which Subsonic similarity endpoint is used:
 /// song/album seeds go through the folder-based `getSimilarSongs`, an artist seed through the ID3-based
-/// `getSimilarSongs2`. ("Radio" is deliberately avoided — it means Internet radio stations elsewhere.)
+/// `getSimilarSongs2`.
 nonisolated enum InstantMixSeed: Sendable, Hashable {
     case song(id: String)
     case album(id: String)
@@ -64,10 +64,6 @@ protocol LibraryServiceProtocol: AnyObject, Sendable {
     /// Server has no "exclude recently played" filter — filtering is done client-side by the consumer.
     func randomSongs(size: Int) async throws -> [Song]
 
-    /// Raw `getSongsByGenre`, returning `Song` rather than `DisplayableSong` so callers keep the
-    /// OpenSubsonic `moods` and `bpm` tags — which is the whole point for the tag-based mood
-    /// fallback. Returns an empty array when the server has nothing under that genre.
-    func songsByGenre(_ genre: String, count: Int) async throws -> [Song]
 
     /// Builds a queue of tracks for Smart Shuffle ("Rediscover Your Library").
     ///

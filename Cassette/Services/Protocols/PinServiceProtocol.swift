@@ -5,16 +5,6 @@
 
 import Foundation
 
-nonisolated enum PinError: Error, LocalizedError {
-    case limitReached
-
-    var errorDescription: String? {
-        switch self {
-        case .limitReached: String(localized: "Maximum 6 items can be pinned to Home.")
-        }
-    }
-}
-
 @MainActor
 protocol PinServiceProtocol: AnyObject {
     func pin(
@@ -24,11 +14,13 @@ protocol PinServiceProtocol: AnyObject {
         displaySubtitle: String,
         coverArtId: String?,
         serverId: UUID
-    ) throws
+    )
     func unpin(itemType: PinnedItemType, itemId: String)
     func isPinned(itemType: PinnedItemType, itemId: String) -> Bool
     func reorder(items: [PinnedItem])
     func currentPinnedCount() -> Int
     /// Updates the stored cover art ID for a pinned item. No-op if not pinned.
     func updateCoverArtId(itemType: PinnedItemType, itemId: String, newCoverArtId: String?)
+    /// 重命名固定项的显示名（本地 SwiftData）。
+    func renamePinnedItem(itemType: PinnedItemType, itemId: String, newName: String)
 }

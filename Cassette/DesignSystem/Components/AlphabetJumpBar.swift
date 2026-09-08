@@ -9,10 +9,6 @@ struct AlphabetJumpBar: View {
     let availableLetters: Set<String>
     let onLetterTap: (String) -> Void
 
-    #if os(iOS)
-    @State private var lastLetterReported: String?
-    @State private var lastHapticTime: Date = .distantPast
-    #endif
 
     private static let letters = [
         "A", "B", "C", "D", "E", "F", "G", "H", "I", "J", "K", "L", "M",
@@ -20,50 +16,9 @@ struct AlphabetJumpBar: View {
     ]
 
     var body: some View {
-        #if os(iOS)
-        iOSBody
-        #else
         macOSBody
-        #endif
     }
 
-    #if os(iOS)
-    private var iOSBody: some View {
-        VStack(spacing: 2) {
-            ForEach(Self.letters, id: \.self) { letter in
-                Text(letter)
-                    .font(.system(size: 11, weight: .semibold))
-                    .frame(width: 14, height: 16)
-                    .foregroundStyle(
-                        availableLetters.contains(letter)
-                            ? Color.cassetteAccent
-                            : Color.secondary.opacity(0.3)
-                    )
-            }
-        }
-        .padding(.vertical, 8)
-        .padding(.horizontal, 4)
-        .contentShape(Rectangle())
-        .gesture(
-            DragGesture(minimumDistance: 0)
-                .onChanged { value in
-                    let index = max(0, min(Self.letters.count - 1, Int((value.location.y - 8) / 18)))
-                    let letter = Self.letters[index]
-                    let now = Date()
-                    guard letter != lastLetterReported,
-                          availableLetters.contains(letter),
-                          now.timeIntervalSince(lastHapticTime) > 0.04 else { return }
-                    lastLetterReported = letter
-                    lastHapticTime = now
-                    HapticFeedback.selection.trigger()
-                    onLetterTap(letter)
-                }
-                .onEnded { _ in
-                    lastLetterReported = nil
-                }
-        )
-    }
-    #else
     private var macOSBody: some View {
         VStack(spacing: 2) {
             ForEach(Self.letters, id: \.self) { letter in
@@ -88,7 +43,6 @@ struct AlphabetJumpBar: View {
         .padding(.vertical, 8)
         .padding(.horizontal, 4)
     }
-    #endif
 }
 
 // MARK: - Helpers

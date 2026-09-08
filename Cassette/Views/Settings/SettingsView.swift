@@ -40,6 +40,7 @@ struct SettingsView: View {
             CacheSectionView()
             ReplayGainSettingsSection()
             CrossfadeSettingsSection()
+            GlobalHotkeySection()
             serverSection()
             integrationsSection()
             aboutSection()
@@ -83,15 +84,6 @@ struct SettingsView: View {
                     Text("ListenBrainz")
                 } icon: {
                     SettingsIcon(systemImage: "link.circle", color: .indigo)
-                }
-            }
-            NavigationLink {
-                AudioMuseSettingsView()
-            } label: {
-                Label {
-                    Text("AudioMuse")
-                } icon: {
-                    SettingsIcon(systemImage: "waveform.badge.magnifyingglass", color: .teal)
                 }
             }
             NavigationLink {
@@ -212,9 +204,9 @@ struct CacheSectionView: View {
                 Stepper(
                     value: Binding(
                         get: { cacheSettings.maxTracks },
-                        set: { cacheSettings.maxTracks = max(1, min(10, $0)) }
+                        set: { cacheSettings.maxTracks = max(1, min(100, $0)) }
                     ),
-                    in: 1...10
+                    in: 1...100
                 ) {
                     HStack {
                         Label {

@@ -31,7 +31,6 @@ final class AppContainer {
     let favoritesService: any FavoritesServiceProtocol
     let pinService: any PinServiceProtocol
     let playlistService: any PlaylistServiceProtocol
-    let radioService: any RadioServiceProtocol
     let toastService = ToastService()
     let networkMonitor = NetworkMonitor()
     let sessionService: PlaybackSessionService
@@ -39,10 +38,6 @@ final class AppContainer {
     let artworkImageCache: ArtworkImageCache
     let statsService: StatsService
     private let _player: PlayerService
-    let wrappedPlaylistService: WrappedPlaylistService
-    /// Weekly mood playlists. Always available: AudioMuse powers them when configured, the
-    /// server's own tags when not.
-    let moodPlaylistService: MoodPlaylistService
     let lyricsService: LyricsService
     let widgetSyncService: WidgetSyncService
     let recommendationService: RecommendationService
@@ -71,8 +66,6 @@ final class AppContainer {
         let server = ServerService(state: serverState, keychain: keychain, modelContainer: modelContainer, audioStreamCache: cache)
         serverService = server
         lyricsService = LyricsService(serverService: server, modelContainer: modelContainer)
-        wrappedPlaylistService = WrappedPlaylistService(serverService: server, statsService: stats)
-        radioService = RadioService(serverService: server)
 
         let download = DownloadService(serverService: server, modelContainer: modelContainer, toastService: toastService, cacheSettings: cacheSettings)
         downloadService = download
@@ -81,24 +74,6 @@ final class AppContainer {
         libraryService = library
 
         artworkImageCache = ArtworkImageCache(downloadService: download, libraryService: library)
-        // The cover applier is a closure because PlaylistCoverManager is MainActor-bound while
-        // MoodPlaylistService is an actor; this keeps the hop at the boundary instead of inside it.
-        let moodState = serverState
-        let moodCovers: @Sendable (PlaylistGradientSpec, String) async -> Void = { [artworkImageCache] spec, playlistId in
-            let manager = await PlaylistCoverManager(
-                serverState: moodState,
-                serverService: server,
-                downloadService: download,
-                artworkImageCache: artworkImageCache
-            )
-            await manager.applyGradientCover(spec, playlistId: playlistId)
-        }
-        moodPlaylistService = MoodPlaylistService(
-            serverService: server,
-            serverState: serverState,
-            libraryService: library,
-            coverApplier: moodCovers
-        )
 
         let resolver = MediaResolver(
             downloadService: download,
@@ -143,7 +118,7 @@ final class AppContainer {
         Task { [playlist] in await playlist.retryMissingPlaylistDownloads() }
 
         let subsonicProvider = SubsonicRecommendationProvider(libraryService: library)
-        let lbProvider = ListenBrainzRecommendationProvider(client: lbClient, service: lb, libraryService: library)
+        let lbProvider = ListenBrainzRecommendationProvider(client: lbClient, libraryService: library)
         recommendationService = RecommendationService(providers: [lbProvider, subsonicProvider])
 
         searchHistoryService = SearchHistoryService(container: modelContainer)
@@ -214,10 +189,15 @@ extension ModelContainer {
 
 extension AppContainer {
     private static let coverArtCacheVersionKey = "cassette.coverArtCacheVersion"
-    private static let currentCoverArtCacheVersion = 5
+    private static let currentCoverArtCacheVersion = 7
 
     /// Purges cover art files from disk on the first launch after a cache format change,
     /// so stale files don't shadow the new decode pipeline. Version history:
+    ///   v7 — thumb decode raised 240 → 480 px: grid cards reach 180 pt (360 px @2x), so
+    ///         240 px files were visibly soft on the Home grid. Wipe forces re-download.
+    ///   v6 — the TEMP-ROLLBACK build wrote wrong-resolution files under `@thumb` (the
+    ///         display-pt size of whichever surface fetched first: 32/88/112/360 px).
+    ///         Tiered keys are restored; wipe forces a clean re-download at 240/1200 px.
     ///   v5 — ArtworkImageCache now decodes at 240 px (thumb) / 1200 px (full) via
     ///         CGImageSourceCreateThumbnailAtIndex; legacy full-res files cause ~800 ms
     ///         decodes on cold open even after the code fix — wipe forces a clean re-download.
